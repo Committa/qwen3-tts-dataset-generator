@@ -1,0 +1,6 @@
+# Test phrases — one per line, used by test-gen-dataset to evaluate all speakers.
+# Empty lines and lines starting with '#' are ignored.
+
+Buongiorno, benvenuti alla presentazione del nuovo sistema vocale.
+L'intelligenza artificiale sta trasformando il modo in cui interagiamo con la tecnologia.
+Roma è la città eterna, ricca di storia, arte e cultura millenaria.

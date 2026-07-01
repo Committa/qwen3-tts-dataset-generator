@@ -1,0 +1,26 @@
+# Sample corpus - one sentence per line.
+# Empty lines and lines starting with '#' are ignored.
+
+Buongiorno, benvenuti alla presentazione del nuovo sistema di sintesi vocale.
+L'intelligenza artificiale sta trasformando il modo in cui interagiamo con la tecnologia.
+Roma e la citta' eterna, ricca di storia, arte e cultura millenaria.
+Il treno per Milano parte dal binario cinque fra dieci minuti.
+Mi piace ascoltare la musica classica mentre lavoro al computer.
+Oggi il tempo e' sereno e la temperatura e' mite.
+Per favore, puoi passarmi il sale e l'olio d'oliva?
+La riunione di domani e' stata posticipata alle quindici.
+Sto leggendo un libro molto interessante sulla storia dell'impero romano.
+Il gatto dorme beatamente sul divano vicino alla finestra.
+La nuova linea metropolitana ridurra' i tempi di percorrenza in citta'.
+Ho prenotato un tavolo per quattro persone al ristorante sul lungomare.
+
+Il progetto prevede un investimento di circa due milioni di euro distribuito su tre anni.
+L'esperimento ha confermato l'ipotesi iniziale con un margine di errore del tre per cento.
+In Italia ci sono venti regioni e oltre cento province, ognuna con le proprie tradizioni.
+Domani mattina alle nove e trenta inizia la conferenza sulla sostenibilita' ambientale.
+
+L'autore ha scritto: la conoscenza e' potere, ma la saggezza e' saperla usare.
+Il prezzo attuale al litro si aggira intorno a un euro e ottantacinque centesimi.
+La temperatura e' variabile: dobbiamo misurare ogni trenta minuti per dodici ore.
+La funzione f di x uguale a x al quadrato piu' b x piu' c ha due radici reali.
+La capitale della Francia e' Parigi, una delle citta' piu' visitate al mondo.

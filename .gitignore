@@ -1,0 +1,16 @@
+*.pyc
+__pycache__/
+*.egg-info/
+.venv/
+dist/
+build/
+logs/*.log
+logs/*.json
+workspace/*
+!workspace/.gitkeep
+output/gen*/
+output/test_speaker/*
+!inputs/.gitkeep
+!.gitkeep
+.ENV
+.env

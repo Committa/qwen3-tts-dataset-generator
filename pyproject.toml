@@ -1,0 +1,52 @@
+[tool.poetry]
+name = "qwen3-tts-dataset-generator"
+version = "0.1.0"
+description = "End-to-end pipeline for generating a synthetic Italian TTS dataset using Qwen3-TTS with automatic quality validation."
+authors = ["italian-synthetic-tts"]
+license = "MIT"
+readme = "README.md"
+packages = [{ include = "src" }]
+
+[tool.poetry.dependencies]
+python = ">=3.11.9,<3.12"
+
+qwen-tts = "0.1.1"
+transformers = "4.57.3"
+accelerate = "1.12.0"
+
+torch = { version = ">=2.5.1,<2.7.0", source = "pytorch-cu124" }
+torchaudio = { version = ">=2.5.1,<2.7.0", source = "pytorch-cu124" }
+
+faster-whisper = ">=1.2.1"
+jiwer = ">=4.0.0"
+pyloudnorm = ">=0.2.0"
+soundfile = ">=0.12.0"
+librosa = ">=0.10.0"
+pydub = ">=0.25.1"
+pyyaml = ">=6.0"
+tqdm = ">=4.66.0"
+click = ">=8.1.8"
+
+[tool.poetry.group.dev.dependencies]
+black = ">=24.0.0"
+isort = ">=5.13.0"
+ruff = ">=0.5.0"
+
+[tool.poetry.scripts]
+gen-dataset = "src.pipeline:main"
+test-gen-dataset = "src.test_speaker:main"
+
+[[tool.poetry.source]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+priority = "explicit"
+
+[tool.isort]
+profile = "black"
+line_length = 120
+multi_line_output = 3
+ensure_newline_before_comments = true
+
+[build-system]
+requires = ["poetry-core>=1.8.0"]
+build-backend = "poetry.core.masonry.api"

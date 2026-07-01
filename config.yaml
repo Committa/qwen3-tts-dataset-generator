@@ -1,0 +1,37 @@
+model_size: "0.6b"
+dtype: "bfloat16"
+device_map: "cuda:0"
+attn_implementation: "sdpa"
+
+speaker: "Vivian"
+language: "Italian"
+instruct: ""
+
+batch_size: 4
+seed: 42
+max_new_tokens: 2048
+
+asr_model: "medium"
+asr_device: "cuda"
+asr_compute_type: "float16"
+wer_threshold: 0.20
+
+target_sample_rate: 22050
+target_lufs: -23.0
+trim_silence_db: 40
+
+val_ratio: 0.1
+
+paths:
+  input_sentences: "italian_sentences.txt"
+  test_sentences: "test_sentences.txt"
+  raw_wav: "workspace/raw_wav"
+  accepted_wav: "workspace/accepted_wav"
+  rejected: "workspace/rejected"
+  manifest_train: "workspace/.manifest_train.csv"
+  manifest_val: "workspace/.manifest_val.csv"
+  report: "workspace/.report.json"
+  checkpoint: "workspace/.generate_checkpoint.json"
+  log_file: "logs/pipeline.log"
+
+clean_on_full_run: true
