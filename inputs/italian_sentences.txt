@@ -15,7 +15,7 @@ La nuova linea metropolitana ridurrà i tempi di percorrenza in città.
 Ho prenotato un tavolo per quattro persone al ristorante sul lungomare.
 
 Il progetto prevede un investimento di circa due milioni di euro distribuito su tre anni.
-L'esperimento ha confermato l'ipotesi iniziale con un margine di errore del tre per cento.
+L'esperimento ha confermato l'ipotesi iniziale con un margine di errore del 3%.
 In Italia ci sono venti regioni e oltre cento province, ognuna con le proprie tradizioni.
 Domani mattina alle nove e trenta inizia la conferenza sulla sostenibilità ambientale.
 

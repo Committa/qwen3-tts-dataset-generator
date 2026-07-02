@@ -26,7 +26,7 @@ def _normalize_text(text: str, lang_code: str | None = None) -> str:
 
     if _alpha2digit is not None and lang_code is not None:
         try:
-            text = _alpha2digit(text, lang_code)
+            text = _alpha2digit(text, lang_code, threshold=2)
         except Exception:
             if _logger is not None:
                 _logger.warning(
