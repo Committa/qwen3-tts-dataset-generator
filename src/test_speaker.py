@@ -216,7 +216,7 @@ def _test_base_voices(
         cfg.voice.name = voice_name
         try:
             prompt_items = gen_mod.get_voice_clone_prompt(
-                model, cfg, logger, use_cache=False
+                model, cfg, logger, use_cache=True
             )
         except Exception as e:
             logger.warning("Failed to build prompt for voice '%s': %s", voice_name, e)

@@ -11,12 +11,12 @@ instruct: ""
 
 # --- base mode (voice clone from a reference audio) ---
 # Uncomment and set model_type: "base" above to clone a custom voice.
-# Place the reference audio at inputs/voices/<name>/ref.wav and, for ICL mode
-# (recommended), the transcript at inputs/voices/<name>/ref.txt.
-# voice:
-#   name: "my_voice"            # directory under inputs/voices/
-#   x_vector_only_mode: false   # false=ICL (best quality, needs ref.txt) | true=x-vector-only
-#   prompt_cache: "workspace/.voice_prompt.pt"
+# Place the reference audio at inputs/voices/<name>.wav and, for ICL mode
+# (recommended), the transcript at inputs/voices/<name>.txt.
+voice:
+  name: "my_voice"            # -> inputs/voices/my_voice.wav + my_voice.txt
+  x_vector_only_mode: false   # false=ICL (best quality, needs my_voice.txt) | true=x-vector-only
+  prompt_cache: "workspace/.voice_cache"
 
 batch_size: 4
 seed: 42

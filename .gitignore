@@ -16,3 +16,5 @@ output/test_speaker/*
 poetry.lock
 temp/
 .env
+inputs/voices/*
+!inputs/voices/.gitkeep

@@ -169,13 +169,14 @@ instead of using a preset speaker. The Base model
 in ICL mode, reference speech codes) from the sample and reapplies it to the
 whole corpus.
 
-Each custom voice lives in its own directory under `inputs/voices/`:
+Each custom voice lives as a pair of files under `inputs/voices/`:
 
 ```
 inputs/voices/
-└── my_voice/
-    ├── ref.wav   # reference audio (required)
-    └── ref.txt   # transcript (required for ICL mode, optional for x-vector-only)
+├── my_voice.wav   # reference audio (required)
+├── my_voice.txt   # transcript (required for ICL mode, optional for x-vector-only)
+├── another.wav
+└── another.txt
 ```
 
 Configuration:
@@ -183,9 +184,9 @@ Configuration:
 ```yaml
 model_type: "base"
 voice:
-  name: "my_voice"            # -> inputs/voices/my_voice/
+  name: "my_voice"            # -> inputs/voices/my_voice.wav + my_voice.txt
   x_vector_only_mode: false   # false=ICL (best quality, needs ref.txt) | true=x-vector-only
-  prompt_cache: "workspace/.voice_prompt.pt"
+  prompt_cache: "workspace/.voice_cache"
 ```
 
 Two cloning modes are supported:
@@ -195,8 +196,7 @@ Two cloning modes are supported:
 - **x-vector-only** (`x_vector_only_mode: true`): uses only the speaker embedding,
   no transcript needed. Lower quality.
 
-The extracted `VoiceClonePromptItem` is cached to `workspace/.voice_prompt.pt`
-and reused across runs; the cache is invalidated automatically when the
+The extracted `VoiceClonePromptItem` is cached per-voice under `workspace/.voice_cache/` (e.g. `workspace/.voice_cache/my_voice.pt`) and reused across runs; the cache is invalidated automatically when the
 reference audio, transcript, cloning mode, model type, or model size change.
 
 Test every custom voice before the full run:
@@ -233,9 +233,7 @@ poetry run test-gen-dataset --speaker my_voice   # test a single voice
 │   ├── italian_sentences.txt
 │   ├── test_sentences.txt
 │   └── voices/             # custom voices for base (voice clone) mode
-│       └── <name>/
-│           ├── ref.wav
-│           └── ref.txt
+│       └── <name>.wav        # + <name>.txt for ICL transcript
 ├── workspace/              # volatile (auto-cleaned on full run)
 │   ├── raw_wav/
 │   ├── accepted_wav/

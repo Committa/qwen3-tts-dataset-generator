@@ -85,9 +85,9 @@ class Paths:
 class VoiceConfig:
     """Configuration for a custom voice used in voice-clone (base) mode.
 
-    A custom voice lives under inputs/voices/<name>/ and is defined by a
-    reference audio clip (ref.wav) plus, for ICL mode, its transcript
-    (ref.txt).
+    A custom voice lives under inputs/voices/<name>.wav and is defined by a
+    reference audio clip (<name>.wav) plus, for ICL mode, its transcript
+    (<name>.txt).
 
     Attributes:
         name: Voice directory name under inputs/voices/. Resolved to
@@ -102,7 +102,7 @@ class VoiceConfig:
     name: str = ""
     x_vector_only_mode: bool = False
     prompt_cache: Path = field(
-        default_factory=lambda: Path("workspace/.voice_prompt.pt")
+        default_factory=lambda: Path("workspace/.voice_cache")
     )
 
 
@@ -245,7 +245,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
     cfg.voice = VoiceConfig(
         name=v.get("name", ""),
         x_vector_only_mode=bool(v.get("x_vector_only_mode", False)),
-        prompt_cache=_resolve_path(v.get("prompt_cache", "workspace/.voice_prompt.pt")),
+        prompt_cache=_resolve_path(v.get("prompt_cache", "workspace/.voice_cache")),
     )
     return cfg
 
@@ -498,8 +498,8 @@ def accept_clips(cfg: Config, indices: list[int]) -> dict[str, int]:
 def resolve_voice_paths(cfg: Config) -> tuple[Path, Path]:
     """Resolve the reference audio and transcript paths for the configured custom voice.
 
-    The voice is located at inputs/voices/<voice.name>/, expecting ref.wav (always)
-    and ref.txt (required only for ICL mode, i.e. when x_vector_only_mode is False).
+    The voice files live directly under inputs/voices/ as <voice.name>.wav (always)
+    and <voice.name>.txt (required only for ICL mode, i.e. when x_vector_only_mode is False).
 
     Args:
         cfg: Pipeline configuration.
@@ -509,20 +509,20 @@ def resolve_voice_paths(cfg: Config) -> tuple[Path, Path]:
 
     Raises:
         ValueError: If voice.name is empty.
-        FileNotFoundError: If ref.wav does not exist.
+        FileNotFoundError: If <voice.name>.wav does not exist.
     """
     if not cfg.voice.name:
         raise ValueError(
             "voice.name is required when model_type='base'. "
-            "Set voice.name in config.yaml to a directory under inputs/voices/."
+            "Set voice.name in config.yaml to a voice name under inputs/voices/."
         )
-    voice_dir = PROJECT_ROOT / "inputs" / "voices" / cfg.voice.name
-    ref_wav = voice_dir / "ref.wav"
-    ref_text = voice_dir / "ref.txt"
+    voices_dir = PROJECT_ROOT / "inputs" / "voices"
+    ref_wav = voices_dir / f"{cfg.voice.name}.wav"
+    ref_text = voices_dir / f"{cfg.voice.name}.txt"
     if not ref_wav.exists():
         raise FileNotFoundError(
             f"Reference audio not found: {ref_wav}. "
-            f"Place a wav file at inputs/voices/{cfg.voice.name}/ref.wav."
+            f"Place a wav file at inputs/voices/{cfg.voice.name}.wav."
         )
     return ref_wav, ref_text
 
@@ -530,21 +530,22 @@ def resolve_voice_paths(cfg: Config) -> tuple[Path, Path]:
 def list_available_voices(cfg: Config) -> list[str]:
     """List available custom voice names under inputs/voices/.
 
-    A voice is a subdirectory of inputs/voices/ containing a ref.wav file.
+    A voice is any .wav file directly in inputs/voices/. The filename stem
+    (without .wav) is the voice name.
 
     Args:
         cfg: Pipeline configuration.
 
     Returns:
-        Sorted list of voice directory names. Empty list if inputs/voices/ does not exist.
+        Sorted list of voice names. Empty list if inputs/voices/ does not exist.
     """
     voices_dir = PROJECT_ROOT / "inputs" / "voices"
     if not voices_dir.exists():
         return []
     voices: list[str] = []
     for p in sorted(voices_dir.iterdir()):
-        if p.is_dir() and (p / "ref.wav").exists():
-            voices.append(p.name)
+        if p.suffix.lower() == ".wav":
+            voices.append(p.stem)
     return voices
 
 

@@ -141,13 +141,14 @@ def get_voice_clone_prompt(
         if not ref_text_path.exists():
             raise FileNotFoundError(
                 f"Reference transcript not found: {ref_text_path}. "
-                f"ICL mode requires inputs/voices/{cfg.voice.name}/ref.txt. "
+                f"ICL mode requires inputs/voices/{cfg.voice.name}.txt. "
                 f"Set voice.x_vector_only_mode: true to skip the transcript "
                 f"(lower quality)."
             )
         ref_text = ref_text_path.read_text(encoding="utf-8").strip()
 
-    cache_path = cfg.voice.prompt_cache
+    cache_dir = cfg.voice.prompt_cache
+    cache_path = cache_dir / f"{cfg.voice.name}.pt"
     fp = common.voice_fingerprint(cfg)
     if use_cache and cache_path.exists():
         try:
@@ -172,7 +173,7 @@ def get_voice_clone_prompt(
     )
     if use_cache:
         payload = {"fingerprint": fp, "items": [asdict(it) for it in items]}
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_dir.mkdir(parents=True, exist_ok=True)
         torch.save(payload, str(cache_path))
         logger.info("Cached voice prompt -> %s", cache_path)
     return [items[0]]
