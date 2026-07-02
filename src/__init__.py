@@ -1,1 +1,1 @@
-"""src package: Italian synthetic TTS dataset pipeline."""
+"""src package: synthetic TTS dataset pipeline."""

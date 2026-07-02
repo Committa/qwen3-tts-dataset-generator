@@ -94,7 +94,7 @@ def _transcribe(asr_model, wav_path: Path, lang_code: str) -> str:
 def run_validate(cfg: common.Config) -> dict[str, Any]:
     """Run ASR validation on all generated clips.
 
-    Transcribes each raw wav with faster-whisper (Italian model), computes WER
+    Transcribes each raw wav with faster-whisper, computes WER
     against the expected text, and moves clips to accepted_wav/ or rejected/
     based on the configured wer_threshold.
 

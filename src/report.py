@@ -123,7 +123,7 @@ def _seconds_to_hhmmss(seconds: float) -> str:
 
 def _print_report(report: dict[str, Any]) -> None:
     print("\n" + "=" * 60)
-    print("FINAL REPORT - Italian synthetic TTS dataset")
+    print("FINAL REPORT - Synthetic TTS dataset")
     print("=" * 60)
     t = report["totals"]
     print(f"  Input sentences       : {t['input_sentences']}")

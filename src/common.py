@@ -121,7 +121,7 @@ class Config:
     device_map: str = "cuda:0"
     attn_implementation: str = "sdpa"
     speaker: str = "Vivian"
-    language: str = "Italian"
+    language: str = "Auto"
     instruct: str = ""
     batch_size: int = 4
     seed: int = 42
@@ -220,7 +220,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
     p = raw.get("paths", {})
     cfg.paths = Paths(
         input_sentences=_resolve_path(
-            p.get("input_sentences", "italian_sentences.txt"), is_input=True
+            p.get("input_sentences", "sentences.txt"), is_input=True
         ),
         test_sentences=_resolve_path(
             p.get("test_sentences", "test_sentences.txt"), is_input=True

@@ -56,7 +56,7 @@ poetry run ruff check src            # lint
 
 ## What NOT to do
 
-- Do not translate the Italian sentences inside `inputs/italian_sentences.txt` — that is the TTS corpus data and must remain in Italian.
+- Do not translate the Italian sentences inside `inputs/sentences.txt` — that is the TTS corpus data and must remain in Italian.
 - Do not add a `[tool.ruff]` config section without checking — ruff uses defaults currently.
 - No test suite exists. `src/test_speaker.py` is a utility script, not a unit test. Do not assume pytest is configured.
 

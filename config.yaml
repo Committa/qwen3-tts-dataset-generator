@@ -6,7 +6,7 @@ attn_implementation: "sdpa"
 
 # --- custom_voice mode (preset speakers) ---
 speaker: "Vivian"
-language: "Italian"
+language: "Auto"
 instruct: ""
 
 # --- base mode (voice clone from a reference audio) ---
@@ -34,7 +34,7 @@ trim_silence_db: 40
 val_ratio: 0.1
 
 paths:
-  input_sentences: "italian_sentences.txt"
+  input_sentences: "sentences.txt"
   test_sentences: "test_sentences.txt"
   raw_wav: "workspace/raw_wav"
   accepted_wav: "workspace/accepted_wav"

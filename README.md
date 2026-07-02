@@ -1,6 +1,6 @@
 # qwen3-tts-dataset-generator
 
-**Production-ready** pipeline that transforms a text corpus into a **synthetic TTS dataset**
+**Pipeline** that transforms a text corpus into a **synthetic TTS dataset**
 validated by ASR. It generates audio with [Qwen3-TTS], filters out low-quality clips via WER,
 normalizes them (resample, loudness, silence trim), and produces a ready-to-use LJSpeech
 manifest with train/val split.
@@ -50,9 +50,11 @@ docker run --rm --gpus all \
 
 ## Preparing the input corpus
 
-Before running the pipeline, prepare `inputs/italian_sentences.txt` with your own text corpus, one sentence per line. Lines starting with `#` and blank lines are ignored.
-
-The quality of the generated dataset depends on the input text: use clean, natural sentences covering your target domain. The sample file included in the repo contains 20 placeholder Italian sentences for testing. You can use any language supported by Qwen3-TTS.
+Prepare your text corpus as a plain text file, one sentence per line.
+Lines starting with `#` and blank lines are ignored. The default path is
+`inputs/sentences.txt` (configured via `paths.input_sentences` in
+`config.yaml`). The sample file included in the repo contains placeholder
+sentences for testing. Works with any language supported by Qwen3-TTS.
 
 ## Usage
 
@@ -135,14 +137,20 @@ Main parameters:
 |---|---|---|
 | `model_size` | `0.6b` | `1.7b` or `0.6b` |
 | `model_type` | `custom_voice` | `custom_voice` (preset speakers) or `base` (voice clone) |
+| `dtype` | `bfloat16` | `bfloat16` or `float16` |
 | `device_map` | `cuda:0` | `"auto"` for CPU offload with 1.7B on 12 GB |
 | `speaker` | `Vivian` | preset speaker (custom_voice mode only) |
-| `voice.name` | _(none)_ | custom voice directory under `inputs/voices/` (base mode) |
-| `voice.x_vector_only_mode` | `false` | `false`=ICL (best quality, needs `ref.txt`) \| `true`=x-vector-only |
-| `language` | `Italian` | `Auto` for automatic detection |
+| `voice.name` | _(none)_ | file stem under `inputs/voices/` (base mode, e.g. `my_voice` → `my_voice.wav`) |
+| `voice.x_vector_only_mode` | `false` | `false`=ICL (best quality, needs `<name>.txt`) \| `true`=x-vector-only |
+| `language` | `Auto` | `Auto` for automatic detection, or a language name (`italian`, `english`, etc.) |
+| `max_new_tokens` | `2048` | Maximum tokens generated per clip |
+| `seed` | `42` | Reproducibility for train/val split and sampling |
+| `batch_size` | `4` | 4–8 recommended on 12 GB |
+| `asr_model` | `medium` | faster-whisper model size (`tiny`/`base`/`small`/`medium`/`large-v3`) |
 | `wer_threshold` | `0.20` | WER rejection threshold (20%) |
-| `batch_size` | `4` | 4-8 recommended on 12 GB |
-| `target_sample_rate` | `22050` | 22050 Hz standard |
+| `target_sample_rate` | `22050` | Output sample rate in Hz |
+| `target_lufs` | `-23.0` | Loudness normalization target (EBU R128) |
+| `val_ratio` | `0.1` | Fraction of data held out for validation |
 
 ### Speakers (CustomVoice)
 
@@ -209,7 +217,7 @@ poetry run test-gen-dataset --speaker my_voice   # test a single voice
 ## VRAM / OOM
 
 - **1.7B** bf16 ~16 GB → on RTX 4070 (12 GB) use `device_map: "auto"`
-  (slower) or `model_size: 0.6b` (recommended, Italian WER ~1.36%).
+  (slower) or `model_size: 0.6b` (recommended for 12 GB GPUs).
 - On OOM: the pipeline saves the checkpoint and prints a clear suggestion.
 - Full run auto-archives the result in `output/gen{NNN}/`. Use `--no-clean` to skip workspace cleanup.
 
@@ -230,7 +238,7 @@ poetry run test-gen-dataset --speaker my_voice   # test a single voice
 │   ├── pipeline.py         # CLI orchestrator
 │   └── test_speaker.py     # speaker test utility
 ├── inputs/                 # user-provided text corpora and voice samples
-│   ├── italian_sentences.txt
+│   ├── sentences.txt
 │   ├── test_sentences.txt
 │   └── voices/             # custom voices for base (voice clone) mode
 │       └── <name>.wav        # + <name>.txt for ICL transcript

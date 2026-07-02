@@ -1,4 +1,4 @@
-"""Generate test phrases with all available Italian speakers to pick the best one.
+"""Generate test phrases with all available speakers to pick the best one.
 Also verifies that the selected model (1.7b/0.6b) runs on the GPU before the full batch.
 Test phrases are read from inputs/test_sentences.txt.
 
