@@ -138,6 +138,7 @@ Main parameters:
 | `model_size` | `0.6b` | `1.7b` or `0.6b` |
 | `model_type` | `custom_voice` | `custom_voice` (preset speakers) or `base` (voice clone) |
 | `dtype` | `bfloat16` | `bfloat16` or `float16` |
+| `attn_implementation` | `sdpa` | `sdpa` (default), `flash_attention_2` (faster, needs `pip install flash-attn`), or `eager` |
 | `device_map` | `cuda:0` | `"auto"` for CPU offload with 1.7B on 12 GB |
 | `speaker` | `Vivian` | preset speaker (custom_voice mode only) |
 | `voice.name` | _(none)_ | file stem under `inputs/voices/` (base mode, e.g. `my_voice` → `my_voice.wav`) |
