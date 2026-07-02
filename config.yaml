@@ -1,11 +1,22 @@
 model_size: "0.6b"
+model_type: "custom_voice"   # "custom_voice" (preset speakers) | "base" (voice clone)
 dtype: "bfloat16"
 device_map: "cuda:0"
 attn_implementation: "sdpa"
 
+# --- custom_voice mode (preset speakers) ---
 speaker: "Vivian"
 language: "Italian"
 instruct: ""
+
+# --- base mode (voice clone from a reference audio) ---
+# Uncomment and set model_type: "base" above to clone a custom voice.
+# Place the reference audio at inputs/voices/<name>/ref.wav and, for ICL mode
+# (recommended), the transcript at inputs/voices/<name>/ref.txt.
+# voice:
+#   name: "my_voice"            # directory under inputs/voices/
+#   x_vector_only_mode: false   # false=ICL (best quality, needs ref.txt) | true=x-vector-only
+#   prompt_cache: "workspace/.voice_prompt.pt"
 
 batch_size: 4
 seed: 42

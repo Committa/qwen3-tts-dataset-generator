@@ -59,27 +59,165 @@ def load_tts_model(cfg: common.Config):
         raise
     if cfg.seed is not None:
         torch.manual_seed(cfg.seed)
-    _logger.info("Available speakers: %s", ", ".join(model.get_supported_speakers()))
+    actual_type = getattr(model.model, "tts_model_type", None)
+    if actual_type != cfg.model_type:
+        raise RuntimeError(
+            f"Model type mismatch: config model_type='{cfg.model_type}' "
+            f"but loaded model tts_model_type='{actual_type}'. "
+            f"Check model_type/model_size in config.yaml."
+        )
+    if cfg.model_type == "custom_voice":
+        _logger.info(
+            "Available speakers: %s", ", ".join(model.get_supported_speakers())
+        )
+    else:
+        ref_wav, _ = common.resolve_voice_paths(cfg)
+        mode = "x-vector-only" if cfg.voice.x_vector_only_mode else "ICL"
+        _logger.info(
+            "Voice clone: voice='%s' mode=%s ref=%s", cfg.voice.name, mode, ref_wav
+        )
     return model
+
+
+def _rebuild_prompt_item(d: dict) -> "object":
+    """Rebuild a VoiceClonePromptItem from a serialized dict.
+
+    Args:
+        d: Dict with ref_code, ref_spk_embedding, x_vector_only_mode, icl_mode, ref_text.
+
+    Returns:
+        A VoiceClonePromptItem instance.
+    """
+    import torch
+    from qwen_tts import VoiceClonePromptItem
+
+    ref_code = d.get("ref_code", None)
+    if ref_code is not None and not torch.is_tensor(ref_code):
+        ref_code = torch.tensor(ref_code)
+    ref_spk = d.get("ref_spk_embedding", None)
+    if ref_spk is None:
+        raise ValueError("Missing ref_spk_embedding in cached voice prompt.")
+    if not torch.is_tensor(ref_spk):
+        ref_spk = torch.tensor(ref_spk)
+    return VoiceClonePromptItem(
+        ref_code=ref_code,
+        ref_spk_embedding=ref_spk,
+        x_vector_only_mode=bool(d.get("x_vector_only_mode", False)),
+        icl_mode=bool(d.get("icl_mode", not bool(d.get("x_vector_only_mode", False)))),
+        ref_text=d.get("ref_text", None),
+    )
+
+
+def get_voice_clone_prompt(
+    model, cfg: common.Config, logger: logging.Logger, use_cache: bool = True
+) -> list:
+    """Build or load a cached voice-clone prompt for the configured custom voice.
+
+    In ICL mode (x_vector_only_mode=False) the reference transcript ref.txt is
+    required; in x-vector-only mode it is ignored. The resulting
+    VoiceClonePromptItem is cached to cfg.voice.prompt_cache keyed by a
+    fingerprint of the reference audio, transcript, mode and model, so that
+    re-runs skip the prompt extraction.
+
+    Args:
+        model: Loaded Qwen3TTSModel (must be of base type).
+        cfg: Pipeline configuration.
+        logger: Logger instance for diagnostic messages.
+        use_cache: If True, read/write the on-disk prompt cache. If False the
+            prompt is rebuilt from the reference audio without touching the cache.
+
+    Returns:
+        A single-element list containing one VoiceClonePromptItem. The library
+        broadcasts a single prompt over the whole text batch.
+    """
+    from dataclasses import asdict
+
+    import torch
+
+    ref_wav, ref_text_path = common.resolve_voice_paths(cfg)
+    xvec = cfg.voice.x_vector_only_mode
+    ref_text: str | None = None
+    if not xvec:
+        if not ref_text_path.exists():
+            raise FileNotFoundError(
+                f"Reference transcript not found: {ref_text_path}. "
+                f"ICL mode requires inputs/voices/{cfg.voice.name}/ref.txt. "
+                f"Set voice.x_vector_only_mode: true to skip the transcript "
+                f"(lower quality)."
+            )
+        ref_text = ref_text_path.read_text(encoding="utf-8").strip()
+
+    cache_path = cfg.voice.prompt_cache
+    fp = common.voice_fingerprint(cfg)
+    if use_cache and cache_path.exists():
+        try:
+            payload = torch.load(str(cache_path), map_location="cpu", weights_only=True)
+            if payload.get("fingerprint") == fp:
+                item = _rebuild_prompt_item(payload["items"][0])
+                logger.info("Loaded cached voice prompt from %s", cache_path)
+                return [item]
+            logger.info("Voice prompt cache stale (fingerprint mismatch), rebuilding.")
+        except Exception as e:
+            logger.warning("Failed to read voice prompt cache (%s), rebuilding.", e)
+
+    logger.info(
+        "Building voice-clone prompt from %s (mode=%s)",
+        ref_wav,
+        "x-vector-only" if xvec else "ICL",
+    )
+    items = model.create_voice_clone_prompt(
+        ref_audio=str(ref_wav),
+        ref_text=ref_text,
+        x_vector_only_mode=xvec,
+    )
+    if use_cache:
+        payload = {"fingerprint": fp, "items": [asdict(it) for it in items]}
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(payload, str(cache_path))
+        logger.info("Cached voice prompt -> %s", cache_path)
+    return [items[0]]
 
 
 def _generate_batch(
     model,
     texts: list[str],
     cfg: common.Config,
+    voice_clone_prompt: list | None = None,
 ) -> list[tuple[Any, int]]:
+    """Generate a batch of audio clips.
+
+    In custom_voice mode uses generate_custom_voice with the configured speaker;
+    in base mode uses generate_voice_clone with a precomputed voice prompt.
+
+    Args:
+        model: Loaded Qwen3TTSModel.
+        texts: List of sentences to synthesize.
+        cfg: Pipeline configuration.
+        voice_clone_prompt: Single-element list of VoiceClonePromptItem (base mode).
+
+    Returns:
+        List of (wav, sample_rate) tuples.
+    """
     global _logger
     assert _logger is not None
     n = len(texts)
     wavs: list[Any] = []
     try:
-        out, sr = model.generate_custom_voice(
-            text=texts,
-            language=[cfg.language] * n,
-            speaker=[cfg.speaker] * n,
-            instruct=[cfg.instruct] * n if cfg.instruct else None,
-            max_new_tokens=cfg.max_new_tokens,
-        )
+        if cfg.model_type == "base":
+            out, sr = model.generate_voice_clone(
+                text=texts,
+                language=[cfg.language] * n,
+                voice_clone_prompt=voice_clone_prompt,
+                max_new_tokens=cfg.max_new_tokens,
+            )
+        else:
+            out, sr = model.generate_custom_voice(
+                text=texts,
+                language=[cfg.language] * n,
+                speaker=[cfg.speaker] * n,
+                instruct=[cfg.instruct] * n if cfg.instruct else None,
+                max_new_tokens=cfg.max_new_tokens,
+            )
         for w in out:
             wavs.append((w, sr))
         return wavs
@@ -149,6 +287,10 @@ def run_generate(cfg: common.Config, only_rejected: bool = False) -> dict[str, A
 
     model = load_tts_model(cfg)
 
+    voice_clone_prompt: list | None = None
+    if cfg.model_type == "base":
+        voice_clone_prompt = get_voice_clone_prompt(model, cfg, _logger)
+
     generated = 0
     skipped = 0
     start_time = time.time()
@@ -159,7 +301,9 @@ def run_generate(cfg: common.Config, only_rejected: bool = False) -> dict[str, A
         batch_idxs = pending_idx[start : start + batch]
         batch_texts = [sentences[i] for i in batch_idxs]
         try:
-            wavs = _generate_batch(model, batch_texts, cfg)
+            wavs = _generate_batch(
+                model, batch_texts, cfg, voice_clone_prompt=voice_clone_prompt
+            )
         except (MemoryError, SystemExit):
             raise
         except Exception as e:

@@ -59,17 +59,30 @@ def _load_tts(model_id: str, cfg: common.Config, logger: logging.Logger):
 @click.option(
     "--out-dir", default="output/test_speaker", help="Output directory for test wavs."
 )
-def main(config_path: str | None, model_size: str | None, out_dir: str) -> None:
-    """Run speaker test: generate sample audio for all speakers.
+@click.option(
+    "--speaker",
+    "speaker_filter",
+    default=None,
+    help="Test only this speaker (custom_voice) or voice name (base). "
+    "Case-insensitive. Without this flag, all available speakers/voices are tested.",
+)
+def main(
+    config_path: str | None,
+    model_size: str | None,
+    out_dir: str,
+    speaker_filter: str | None,
+) -> None:
+    """Run speaker/voice test: generate sample audio for all available voices.
 
-    Tests every available speaker with the phrases from inputs/test_sentences.txt.
-    Useful for choosing the best speaker and verifying the model runs on the GPU
-    before launching the full pipeline.
+    In custom_voice mode, tests every built-in speaker with the phrases from
+    inputs/test_sentences.txt. In base mode, tests every custom voice found
+    under inputs/voices/. Use --speaker to test a single one.
 
     Args:
         config_path: Path to config.yaml (optional).
         model_size: Override model size (1.7b or 0.6b).
         out_dir: Output directory for generated test wavs.
+        speaker_filter: Optional speaker/voice name to test (case-insensitive).
     """
     cfg = common.load_config(config_path)
     if model_size:
@@ -84,8 +97,13 @@ def main(config_path: str | None, model_size: str | None, out_dir: str) -> None:
     out_dir_path.mkdir(parents=True, exist_ok=True)
 
     model = _load_tts(cfg.model_hub_id, cfg, logger)
-    speakers = model.get_supported_speakers()
-    logger.info("Tested speakers: %s", speakers)
+    actual_type = getattr(model.model, "tts_model_type", None)
+    if actual_type != cfg.model_type:
+        raise RuntimeError(
+            f"Model type mismatch: config model_type='{cfg.model_type}' "
+            f"but loaded model tts_model_type='{actual_type}'. "
+            f"Check model_type/model_size in config.yaml."
+        )
 
     # Load test phrases from inputs/test_sentences.txt
     phrases_path = cfg.paths.test_sentences
@@ -98,6 +116,42 @@ def main(config_path: str | None, model_size: str | None, out_dir: str) -> None:
         logger.warning("No test phrases found in %s", phrases_path)
         return
 
+    if cfg.model_type == "custom_voice":
+        _test_custom_voices(model, cfg, logger, phrases, out_dir_path, speaker_filter)
+    else:
+        _test_base_voices(model, cfg, logger, phrases, out_dir_path, speaker_filter)
+    logger.info("Test completed. Files in: %s", out_dir_path)
+
+
+def _test_custom_voices(
+    model,
+    cfg: common.Config,
+    logger: logging.Logger,
+    phrases: list[str],
+    out_dir: Path,
+    speaker_filter: str | None,
+) -> None:
+    """Generate test phrases for every built-in speaker (custom_voice mode).
+
+    Args:
+        model: Loaded Qwen3TTSModel.
+        cfg: Pipeline configuration.
+        logger: Logger instance.
+        phrases: Test phrases to synthesize.
+        out_dir: Output directory for test wavs.
+        speaker_filter: Optional speaker name to test (case-insensitive).
+    """
+    speakers = model.get_supported_speakers()
+    if speaker_filter:
+        speakers = [s for s in speakers if s.lower() == speaker_filter.lower()]
+        if not speakers:
+            logger.warning(
+                "Speaker '%s' not found. Available: %s",
+                speaker_filter,
+                model.get_supported_speakers(),
+            )
+            return
+    logger.info("Testing speakers: %s", speakers)
     for speaker in speakers:
         for i, sentence in enumerate(phrases):
             try:
@@ -107,7 +161,7 @@ def main(config_path: str | None, model_size: str | None, out_dir: str) -> None:
                     speaker=speaker,
                     max_new_tokens=cfg.max_new_tokens,
                 )
-                fname = out_dir_path / f"{speaker}_{i:02d}.wav"
+                fname = out_dir / f"{speaker}_{i:02d}.wav"
                 sf.write(str(fname), wavs[0], sr)
                 logger.info("OK %s [%d] -> %s", speaker, i, fname.name)
             except MemoryError as e:
@@ -119,7 +173,74 @@ def main(config_path: str | None, model_size: str | None, out_dir: str) -> None:
                     raise SystemExit(2) from e
                 logger.warning("Failed %s [%d]: %s", speaker, i, e)
                 continue
-    logger.info("Test completed. Files in: %s", out_dir_path)
+
+
+def _test_base_voices(
+    model,
+    cfg: common.Config,
+    logger: logging.Logger,
+    phrases: list[str],
+    out_dir: Path,
+    speaker_filter: str | None,
+) -> None:
+    """Generate test phrases for every custom voice under inputs/voices/ (base mode).
+
+    Args:
+        model: Loaded Qwen3TTSModel (base type).
+        cfg: Pipeline configuration.
+        logger: Logger instance.
+        phrases: Test phrases to synthesize.
+        out_dir: Output directory for test wavs.
+        speaker_filter: Optional voice name to test (case-insensitive).
+    """
+    from . import generate as gen_mod
+
+    voices = common.list_available_voices(cfg)
+    if speaker_filter:
+        voices = [v for v in voices if v.lower() == speaker_filter.lower()]
+        if not voices:
+            logger.warning(
+                "Voice '%s' not found. Available: %s",
+                speaker_filter,
+                common.list_available_voices(cfg),
+            )
+            return
+    if not voices:
+        logger.warning(
+            "No custom voices found under inputs/voices/. "
+            "Create inputs/voices/<name>/ref.wav first."
+        )
+        return
+    logger.info("Testing voices: %s", voices)
+    for voice_name in voices:
+        cfg.voice.name = voice_name
+        try:
+            prompt_items = gen_mod.get_voice_clone_prompt(
+                model, cfg, logger, use_cache=False
+            )
+        except Exception as e:
+            logger.warning("Failed to build prompt for voice '%s': %s", voice_name, e)
+            continue
+        for i, sentence in enumerate(phrases):
+            try:
+                wavs, sr = model.generate_voice_clone(
+                    text=sentence,
+                    language=cfg.language,
+                    voice_clone_prompt=prompt_items,
+                    max_new_tokens=cfg.max_new_tokens,
+                )
+                fname = out_dir / f"{voice_name}_{i:02d}.wav"
+                sf.write(str(fname), wavs[0], sr)
+                logger.info("OK %s [%d] -> %s", voice_name, i, fname.name)
+            except MemoryError as e:
+                logger.error(common.OOM_HINT)
+                raise SystemExit(2) from e
+            except Exception as e:
+                if common.is_oom_error(e):
+                    logger.error(common.OOM_HINT)
+                    raise SystemExit(2) from e
+                logger.warning("Failed %s [%d]: %s", voice_name, i, e)
+                continue
 
 
 if __name__ == "__main__":

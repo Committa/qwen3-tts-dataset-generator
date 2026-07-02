@@ -93,7 +93,12 @@ def run_report(
         ),
         "model": {
             "model_size": cfg.model_size,
-            "speaker": cfg.speaker,
+            "model_type": cfg.model_type,
+            "speaker": cfg.speaker if cfg.model_type == "custom_voice" else None,
+            "voice": cfg.voice.name if cfg.model_type == "base" else None,
+            "x_vector_only_mode": (
+                cfg.voice.x_vector_only_mode if cfg.model_type == "base" else None
+            ),
             "language": cfg.language,
             "dtype": cfg.dtype,
         },

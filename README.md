@@ -114,12 +114,18 @@ poetry run gen-dataset --accept 7,13
 poetry run gen-dataset --from normalize
 ```
 
-## Speaker test
+## Speaker / voice test
 
 ```bash
 poetry run test-gen-dataset
 poetry run test-gen-dataset --model-size 0.6b
+poetry run test-gen-dataset --speaker Vivian     # custom_voice: single preset speaker
+poetry run test-gen-dataset --speaker my_voice   # base: single custom voice
 ```
+
+In `custom_voice` mode the sweep covers all built-in speakers; in `base` mode
+it covers every custom voice found under `inputs/voices/`. `--speaker` restricts
+the test to a single one.
 
 ## Config (`config.yaml`)
 
@@ -128,8 +134,11 @@ Main parameters:
 | Parameter | Default | Notes |
 |---|---|---|
 | `model_size` | `0.6b` | `1.7b` or `0.6b` |
+| `model_type` | `custom_voice` | `custom_voice` (preset speakers) or `base` (voice clone) |
 | `device_map` | `cuda:0` | `"auto"` for CPU offload with 1.7B on 12 GB |
-| `speaker` | `Vivian` | 9 available speakers (see below) |
+| `speaker` | `Vivian` | preset speaker (custom_voice mode only) |
+| `voice.name` | _(none)_ | custom voice directory under `inputs/voices/` (base mode) |
+| `voice.x_vector_only_mode` | `false` | `false`=ICL (best quality, needs `ref.txt`) \| `true`=x-vector-only |
 | `language` | `Italian` | `Auto` for automatic detection |
 | `wer_threshold` | `0.20` | WER rejection threshold (20%) |
 | `batch_size` | `4` | 4-8 recommended on 12 GB |
@@ -151,6 +160,51 @@ Main parameters:
 
 Every speaker can speak any supported language. Use
 `poetry run test-gen-dataset` to choose the best one.
+
+### Custom voices (base / voice clone)
+
+Set `model_type: "base"` to clone any voice from a reference audio sample
+instead of using a preset speaker. The Base model
+(`Qwen/Qwen3-TTS-12Hz-{0.6b,1.7b}-Base`) extracts a speaker embedding (and,
+in ICL mode, reference speech codes) from the sample and reapplies it to the
+whole corpus.
+
+Each custom voice lives in its own directory under `inputs/voices/`:
+
+```
+inputs/voices/
+└── my_voice/
+    ├── ref.wav   # reference audio (required)
+    └── ref.txt   # transcript (required for ICL mode, optional for x-vector-only)
+```
+
+Configuration:
+
+```yaml
+model_type: "base"
+voice:
+  name: "my_voice"            # -> inputs/voices/my_voice/
+  x_vector_only_mode: false   # false=ICL (best quality, needs ref.txt) | true=x-vector-only
+  prompt_cache: "workspace/.voice_prompt.pt"
+```
+
+Two cloning modes are supported:
+
+- **ICL** (`x_vector_only_mode: false`, default): uses the reference audio **and**
+  its transcript. Best quality. `ref.txt` is required.
+- **x-vector-only** (`x_vector_only_mode: true`): uses only the speaker embedding,
+  no transcript needed. Lower quality.
+
+The extracted `VoiceClonePromptItem` is cached to `workspace/.voice_prompt.pt`
+and reused across runs; the cache is invalidated automatically when the
+reference audio, transcript, cloning mode, model type, or model size change.
+
+Test every custom voice before the full run:
+
+```bash
+poetry run test-gen-dataset
+poetry run test-gen-dataset --speaker my_voice   # test a single voice
+```
 
 ## VRAM / OOM
 
@@ -175,9 +229,13 @@ Every speaker can speak any supported language. Use
 │   ├── report.py           # final report
 │   ├── pipeline.py         # CLI orchestrator
 │   └── test_speaker.py     # speaker test utility
-├── inputs/                 # user-provided text corpora
+├── inputs/                 # user-provided text corpora and voice samples
 │   ├── italian_sentences.txt
-│   └── test_sentences.txt
+│   ├── test_sentences.txt
+│   └── voices/             # custom voices for base (voice clone) mode
+│       └── <name>/
+│           ├── ref.wav
+│           └── ref.txt
 ├── workspace/              # volatile (auto-cleaned on full run)
 │   ├── raw_wav/
 │   ├── accepted_wav/

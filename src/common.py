@@ -16,10 +16,18 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.yaml"
 
-MODEL_HUB_IDS = {
-    "1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
-    "0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+MODEL_HUB_IDS: dict[str, dict[str, str]] = {
+    "custom_voice": {
+        "1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+        "0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+    },
+    "base": {
+        "1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+        "0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+    },
 }
+
+VALID_MODEL_TYPES = sorted(MODEL_HUB_IDS.keys())
 
 LANGUAGE_CODE_MAP: dict[str, str] = {
     "italian": "it",
@@ -74,6 +82,31 @@ class Paths:
 
 
 @dataclass
+class VoiceConfig:
+    """Configuration for a custom voice used in voice-clone (base) mode.
+
+    A custom voice lives under inputs/voices/<name>/ and is defined by a
+    reference audio clip (ref.wav) plus, for ICL mode, its transcript
+    (ref.txt).
+
+    Attributes:
+        name: Voice directory name under inputs/voices/. Resolved to
+            inputs/voices/<name>/ref.wav and inputs/voices/<name>/ref.txt.
+        x_vector_only_mode: If True, clone using only the speaker embedding
+            (no transcript needed, lower quality). If False, use ICL mode
+            (better quality, requires ref.txt).
+        prompt_cache: Path to the cached VoiceClonePromptItem file, used to
+            avoid re-extracting the prompt on every run.
+    """
+
+    name: str = ""
+    x_vector_only_mode: bool = False
+    prompt_cache: Path = field(
+        default_factory=lambda: Path("workspace/.voice_prompt.pt")
+    )
+
+
+@dataclass
 class Config:
     """All configuration parameters parsed from config.yaml.
 
@@ -83,6 +116,7 @@ class Config:
 
     raw: dict[str, Any] = field(default_factory=dict)
     model_size: str = "0.6b"
+    model_type: str = "custom_voice"
     dtype: str = "bfloat16"
     device_map: str = "cuda:0"
     attn_implementation: str = "sdpa"
@@ -102,6 +136,7 @@ class Config:
     val_ratio: float = 0.1
     clean_on_full_run: bool = True
     test_phrases: list[str] = field(default_factory=list)
+    voice: VoiceConfig = field(default_factory=VoiceConfig)
     paths: Paths = field(
         default_factory=lambda: Paths(
             input_sentences=Path("."),
@@ -119,8 +154,14 @@ class Config:
 
     @property
     def model_hub_id(self) -> str:
-        """Return the HuggingFace model hub ID for the selected model_size."""
-        return MODEL_HUB_IDS[self.model_size.lower()]
+        """Return the HuggingFace model hub ID for the selected model_type and model_size."""
+        try:
+            return MODEL_HUB_IDS[self.model_type.lower()][self.model_size.lower()]
+        except KeyError as exc:
+            raise ValueError(
+                f"Invalid model_type/model_size: '{self.model_type}'/'{self.model_size}'. "
+                f"Valid model_type: {VALID_MODEL_TYPES}; valid model_size: 0.6b, 1.7b."
+            ) from exc
 
 
 def _resolve_path(p: str | os.PathLike[str], is_input: bool = False) -> Path:
@@ -152,6 +193,11 @@ def load_config(config_path: str | Path | None = None) -> Config:
         raw = yaml.safe_load(f) or {}
     cfg = Config(raw=raw)
     cfg.model_size = raw.get("model_size", cfg.model_size)
+    cfg.model_type = raw.get("model_type", cfg.model_type)
+    if cfg.model_type.lower() not in MODEL_HUB_IDS:
+        raise ValueError(
+            f"Invalid model_type: '{cfg.model_type}'. Use one of: {VALID_MODEL_TYPES}."
+        )
     cfg.dtype = raw.get("dtype", cfg.dtype)
     cfg.device_map = raw.get("device_map", cfg.device_map)
     cfg.attn_implementation = raw.get("attn_implementation", cfg.attn_implementation)
@@ -193,6 +239,13 @@ def load_config(config_path: str | Path | None = None) -> Config:
             p.get("checkpoint", "workspace/.generate_checkpoint.json")
         ),
         log_file=_resolve_path(p.get("log_file", "logs/pipeline.log")),
+    )
+
+    v = raw.get("voice") or {}
+    cfg.voice = VoiceConfig(
+        name=v.get("name", ""),
+        x_vector_only_mode=bool(v.get("x_vector_only_mode", False)),
+        prompt_cache=_resolve_path(v.get("prompt_cache", "workspace/.voice_prompt.pt")),
     )
     return cfg
 
@@ -440,3 +493,84 @@ def accept_clips(cfg: Config, indices: list[int]) -> dict[str, int]:
         accepted += 1
     logger.info("Manual accept: %d accepted, %d not found", accepted, not_found)
     return {"accepted": accepted, "not_found": not_found}
+
+
+def resolve_voice_paths(cfg: Config) -> tuple[Path, Path]:
+    """Resolve the reference audio and transcript paths for the configured custom voice.
+
+    The voice is located at inputs/voices/<voice.name>/, expecting ref.wav (always)
+    and ref.txt (required only for ICL mode, i.e. when x_vector_only_mode is False).
+
+    Args:
+        cfg: Pipeline configuration.
+
+    Returns:
+        A (ref_wav, ref_text) tuple of absolute paths.
+
+    Raises:
+        ValueError: If voice.name is empty.
+        FileNotFoundError: If ref.wav does not exist.
+    """
+    if not cfg.voice.name:
+        raise ValueError(
+            "voice.name is required when model_type='base'. "
+            "Set voice.name in config.yaml to a directory under inputs/voices/."
+        )
+    voice_dir = PROJECT_ROOT / "inputs" / "voices" / cfg.voice.name
+    ref_wav = voice_dir / "ref.wav"
+    ref_text = voice_dir / "ref.txt"
+    if not ref_wav.exists():
+        raise FileNotFoundError(
+            f"Reference audio not found: {ref_wav}. "
+            f"Place a wav file at inputs/voices/{cfg.voice.name}/ref.wav."
+        )
+    return ref_wav, ref_text
+
+
+def list_available_voices(cfg: Config) -> list[str]:
+    """List available custom voice names under inputs/voices/.
+
+    A voice is a subdirectory of inputs/voices/ containing a ref.wav file.
+
+    Args:
+        cfg: Pipeline configuration.
+
+    Returns:
+        Sorted list of voice directory names. Empty list if inputs/voices/ does not exist.
+    """
+    voices_dir = PROJECT_ROOT / "inputs" / "voices"
+    if not voices_dir.exists():
+        return []
+    voices: list[str] = []
+    for p in sorted(voices_dir.iterdir()):
+        if p.is_dir() and (p / "ref.wav").exists():
+            voices.append(p.name)
+    return voices
+
+
+def voice_fingerprint(cfg: Config) -> str:
+    """Compute a stable fingerprint of the current voice-clone configuration.
+
+    Used to invalidate the cached VoiceClonePromptItem when the reference audio,
+    transcript, cloning mode, model type, or model size change.
+
+    Args:
+        cfg: Pipeline configuration.
+
+    Returns:
+        A SHA-256 hex digest string.
+    """
+    import hashlib
+
+    ref_wav, ref_text = resolve_voice_paths(cfg)
+    h = hashlib.sha256()
+    h.update(cfg.model_type.encode("utf-8"))
+    h.update(cfg.model_size.encode("utf-8"))
+    h.update(str(cfg.voice.x_vector_only_mode).encode("utf-8"))
+    h.update(ref_wav.resolve().as_posix().encode("utf-8"))
+    st = ref_wav.stat()
+    h.update(str(st.st_mtime).encode("utf-8"))
+    h.update(str(st.st_size).encode("utf-8"))
+    if ref_text.exists():
+        h.update(ref_text.read_bytes())
+    return h.hexdigest()
