@@ -7,7 +7,13 @@ poetry lock                          # generate poetry.lock (required before fir
 poetry install                       # install all deps (torch from cu124 source)
 poetry run gen-dataset               # full pipeline (auto-clean + archive)
 poetry run gen-dataset --no-clean    # full pipeline without auto-clean
-poetry run gen-dataset --step generate  # single step (no clean, no archive)
+poetry run gen-dataset --step generate                # single step generate
+poetry run gen-dataset --step generate --only-rejected  # regenerate rejected clips
+poetry run gen-dataset --step validate                # single step validate
+poetry run gen-dataset --step normalize               # single step normalize
+poetry run gen-dataset --step publish                 # manifest + report + archive
+poetry run gen-dataset --from validate                # validate + normalize + publish
+poetry run gen-dataset --accept 7,13                  # manually accept rejected clips
 poetry run test-gen-dataset          # speaker test
 poetry run gen-dataset --help        # CLI help
 poetry run black src                 # format

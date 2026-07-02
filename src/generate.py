@@ -91,8 +91,13 @@ def _generate_batch(
         raise
 
 
-def run_generate(cfg: common.Config) -> dict[str, Any]:
-    """Generate audio for all sentences, resuming from checkpoint."""
+def run_generate(cfg: common.Config, only_rejected: bool = False) -> dict[str, Any]:
+    """Generate audio for all sentences, resuming from checkpoint.
+
+    Args:
+        cfg: Pipeline configuration.
+        only_rejected: If True, regenerate only previously rejected clips.
+    """
     global _logger
     _logger = common.setup_logging(cfg.paths.log_file)
     common.ensure_dirs(cfg.paths.raw_wav, cfg.paths.log_file.parent)
@@ -108,8 +113,30 @@ def run_generate(cfg: common.Config) -> dict[str, Any]:
     _logger.info("Corpus: %d sentences", total)
 
     done = common.read_checkpoint(cfg.paths.checkpoint)
-    pending_idx = [i for i in range(total) if i not in done]
-    _logger.info("Already processed: %d | pending: %d", len(done), len(pending_idx))
+
+    if only_rejected:
+        rejected_idx = common.read_rejected_indices(cfg)
+        if not rejected_idx:
+            _logger.info("No rejected clips to regenerate.")
+            return {
+                "generated": 0,
+                "skipped": 0,
+                "already_done": len(done),
+                "total": total,
+                "time_seconds": 0.0,
+            }
+        done -= rejected_idx
+        common.write_checkpoint(cfg.paths.checkpoint, done)
+        for idx in rejected_idx:
+            old_wav = cfg.paths.raw_wav / f"{idx:06d}.wav"
+            if old_wav.exists():
+                old_wav.unlink()
+        pending_idx = sorted(rejected_idx)
+        _logger.info("Only-rejected mode: %d clips to regenerate", len(pending_idx))
+    else:
+        pending_idx = [i for i in range(total) if i not in done]
+        _logger.info("Already processed: %d | pending: %d", len(done), len(pending_idx))
+
     if not pending_idx:
         _logger.info("Nothing to do: all sentences have already been generated.")
         return {

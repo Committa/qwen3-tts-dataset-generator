@@ -56,18 +56,62 @@ The quality of the generated dataset depends on the input text: use clean, natur
 
 ## Usage
 
+### Pipeline steps
+
+| Step | Description |
+|------|-------------|
+| `generate` | Create audio from text corpus via Qwen3-TTS (batch GPU inference, resumable) |
+| `validate` | Check each clip with ASR (faster-whisper) + WER, accept/reject |
+| `normalize` | Resample to 22050 Hz, loudness normalize (-23 LUFS), trim silence, 16-bit PCM |
+| `publish` | Build LJSpeech manifest + report + archive to `output/gen{NNN}/` |
+
+### Commands
+
 ```bash
-# Full pipeline (auto-clean + archive)
+# Full pipeline (auto-clean + all steps + archive)
 poetry run gen-dataset
 
 # Full pipeline without auto-clean
 poetry run gen-dataset --no-clean
 
 # Single step
+poetry run gen-dataset --step generate
 poetry run gen-dataset --step validate
+poetry run gen-dataset --step normalize
+poetry run gen-dataset --step publish
+
+# Run from a step onward (no auto-clean)
+poetry run gen-dataset --from validate
+
+# Regenerate only rejected clips
+poetry run gen-dataset --step generate --only-rejected
+
+# Manually accept rejected clips (override ASR)
+poetry run gen-dataset --accept 7,13
 
 # Help
 poetry run gen-dataset --help
+```
+
+### Retry workflow
+
+When validation rejects clips, inspect and retry:
+
+1. Check `workspace/rejected/*.json` for expected vs transcription vs WER
+2. Listen to the rejected wavs in `workspace/rejected/`
+3. If the TTS mispronounced: regenerate + re-validate
+4. If the ASR hallucinated (audio sounds correct): accept manually
+5. Publish the final dataset
+
+```bash
+# Option A: TTS was wrong — regenerate the rejected clips
+poetry run gen-dataset --step generate --only-rejected
+poetry run gen-dataset --step validate
+poetry run gen-dataset --from normalize
+
+# Option B: ASR was wrong — accept manually
+poetry run gen-dataset --accept 7,13
+poetry run gen-dataset --from normalize
 ```
 
 ## Speaker test

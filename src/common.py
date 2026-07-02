@@ -380,3 +380,63 @@ def archive_generation(cfg: Config, gen_number: int) -> None:
     logger.info(
         "Archived generation %03d: %d wavs -> %s", gen_number, wavs_moved, gen_dir
     )
+
+
+def read_rejected_indices(cfg: Config) -> set[int]:
+    """Read the set of rejected sentence indices from workspace/rejected/*.json.
+
+    Args:
+        cfg: Pipeline configuration.
+
+    Returns:
+        Set of rejected sentence indices.
+    """
+    rejected_dir = cfg.paths.rejected
+    if not rejected_dir.exists():
+        return set()
+    indices: set[int] = set()
+    for p in rejected_dir.glob("*.json"):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            idx = data.get("index")
+            if idx is not None:
+                indices.add(int(idx))
+        except (json.JSONDecodeError, OSError):
+            continue
+    return indices
+
+
+def accept_clips(cfg: Config, indices: list[int]) -> dict[str, int]:
+    """Manually accept rejected clips by copying them to accepted_wav/.
+
+    Args:
+        cfg: Pipeline configuration.
+        indices: List of sentence indices to accept.
+
+    Returns:
+        Dict with accepted and not_found counts.
+    """
+    import shutil
+
+    logger = logging.getLogger("qwen3_tts_dataset")
+    accepted = 0
+    not_found = 0
+    for idx in indices:
+        src = cfg.paths.raw_wav / f"{idx:06d}.wav"
+        if not src.exists():
+            logger.warning("Clip %s not found in raw_wav, skipping.", src.name)
+            not_found += 1
+            continue
+        dest = cfg.paths.accepted_wav / src.name
+        cfg.paths.accepted_wav.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(src), str(dest))
+        for p in (
+            cfg.paths.rejected / f"{src.stem}.json",
+            cfg.paths.rejected / src.name,
+        ):
+            if p.exists():
+                p.unlink()
+        logger.info("Manually accepted idx=%d -> %s", idx, dest.name)
+        accepted += 1
+    logger.info("Manual accept: %d accepted, %d not found", accepted, not_found)
+    return {"accepted": accepted, "not_found": not_found}
