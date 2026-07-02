@@ -1,4 +1,5 @@
 """Step 3: quality validation with faster-whisper ASR + WER (jiwer)."""
+
 from __future__ import annotations
 
 import json
@@ -12,24 +13,39 @@ from tqdm import tqdm
 
 from . import common
 
+try:
+    from text_to_num import alpha2digit as _alpha2digit
+except ImportError:
+    _alpha2digit = None
+
 _logger: logging.Logger | None = None
 
 
-def _normalize_text(text: str) -> str:
+def _normalize_text(text: str, lang_code: str | None = None) -> str:
     import unicodedata
+
+    if _alpha2digit is not None and lang_code is not None:
+        try:
+            text = _alpha2digit(text, lang_code)
+        except Exception:
+            if _logger is not None:
+                _logger.warning(
+                    "alpha2digit failed for lang '%s', falling back", lang_code
+                )
 
     text = unicodedata.normalize("NFKD", text).encode("ASCII", "ignore").decode("ASCII")
     text = text.lower().strip()
+    text = re.sub(r"\b(\d+)[.,:;](00)\b", r"\1", text)
     text = re.sub(r"[^\w\s]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
-def _wer(reference: str, hypothesis: str) -> float:
+def _wer(reference: str, hypothesis: str, lang_code: str | None = None) -> float:
     from jiwer import wer as _jiwer_wer
 
-    ref = _normalize_text(reference)
-    hyp = _normalize_text(hypothesis)
+    ref = _normalize_text(reference, lang_code)
+    hyp = _normalize_text(hypothesis, lang_code)
     if not ref:
         return 1.0 if hyp else 0.0
     return float(_jiwer_wer(ref, hyp))
@@ -50,19 +66,25 @@ def _load_asr(cfg: common.Config):
     if device == "cuda":
         try:
             import torch
+
             if not torch.cuda.is_available():
                 _logger.warning("CUDA not available for ASR, falling back to CPU.")
                 device, compute_type = "cpu", "int8"
         except ImportError:
             device, compute_type = "cpu", "int8"
-    _logger.info("Loading ASR faster-whisper '%s' (device=%s, ct=%s)", model_name, device, compute_type)
+    _logger.info(
+        "Loading ASR faster-whisper '%s' (device=%s, ct=%s)",
+        model_name,
+        device,
+        compute_type,
+    )
     return WhisperModel(model_name, device=device, compute_type=compute_type)
 
 
-def _transcribe(asr_model, wav_path: Path, cfg: common.Config) -> str:
+def _transcribe(asr_model, wav_path: Path, lang_code: str) -> str:
     segments, _info = asr_model.transcribe(
         str(wav_path),
-        language="it",
+        language=lang_code,
         beam_size=5,
         vad_filter=True,
     )
@@ -87,6 +109,7 @@ def run_validate(cfg: common.Config) -> dict[str, Any]:
     common.ensure_dirs(cfg.paths.accepted_wav, cfg.paths.rejected)
 
     sentences = _load_sentences(cfg)
+    lang_code = common.language_code(cfg.language)
     raw_dir = cfg.paths.raw_wav
     files = sorted(raw_dir.glob("*.wav"))
     if not files:
@@ -108,15 +131,17 @@ def run_validate(cfg: common.Config) -> dict[str, Any]:
             continue
         expected = sentences[idx]
         try:
-            transcription = _transcribe(asr_model, wav_path, cfg)
+            transcription = _transcribe(asr_model, wav_path, lang_code)
         except Exception as e:
             _logger.warning("ASR failed for %s: %s", wav_path.name, e)
             _move_to_rejected(wav_path, cfg, idx, expected, reason=f"asr_error: {e}")
-            rejected_records.append({"index": idx, "file": wav_path.name, "reason": f"asr_error: {e}"})
+            rejected_records.append(
+                {"index": idx, "file": wav_path.name, "reason": f"asr_error: {e}"}
+            )
             rejected += 1
             continue
 
-        wer = _wer(expected, transcription)
+        wer = _wer(expected, transcription, lang_code)
         wer_values.append(wer)
         if wer <= cfg.wer_threshold:
             dest = cfg.paths.accepted_wav / wav_path.name
@@ -127,14 +152,25 @@ def run_validate(cfg: common.Config) -> dict[str, Any]:
             reason = f"wer={wer:.3f} > {cfg.wer_threshold:.3f}"
             _move_to_rejected(wav_path, cfg, idx, expected, transcription, reason)
             rejected_records.append(
-                {"index": idx, "file": wav_path.name, "wer": wer, "transcription": transcription, "reason": reason}
+                {
+                    "index": idx,
+                    "file": wav_path.name,
+                    "wer": wer,
+                    "transcription": transcription,
+                    "reason": reason,
+                }
             )
             _logger.info("REJECTED idx=%d WER=%.3f", idx, wer)
 
     progress.close()
 
     mean_wer = sum(wer_values) / len(wer_values) if wer_values else 0.0
-    _logger.info("Validation: accepted=%d rejected=%d mean WER=%.3f", accepted, rejected, mean_wer)
+    _logger.info(
+        "Validation: accepted=%d rejected=%d mean WER=%.3f",
+        accepted,
+        rejected,
+        mean_wer,
+    )
 
     if rejected_records:
         (cfg.paths.rejected / "rejected.log").write_text(

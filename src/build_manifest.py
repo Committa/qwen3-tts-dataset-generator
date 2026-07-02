@@ -1,4 +1,5 @@
 """Step 5: build LJSpeech manifest (filename|text) with deterministic train/val split."""
+
 from __future__ import annotations
 
 import csv
@@ -45,7 +46,9 @@ def run_build_manifest(cfg: common.Config) -> dict[str, Any]:
     accept_dir = cfg.paths.accepted_wav
     files = sorted(accept_dir.glob("*.wav"), key=lambda p: _index_from_name(p.name))
     if not files:
-        _logger.warning("No accepted wav in %s. Run validate+normalize first.", accept_dir)
+        _logger.warning(
+            "No accepted wav in %s. Run validate+normalize first.", accept_dir
+        )
         return {"train": 0, "val": 0, "total": 0}
 
     rng = random.Random(cfg.seed)
@@ -68,7 +71,12 @@ def run_build_manifest(cfg: common.Config) -> dict[str, Any]:
 
     _write_csv(cfg.paths.manifest_train, train_rows)
     _write_csv(cfg.paths.manifest_val, val_rows)
-    _logger.info("Manifests written -> train=%d val=%d (ratio=%.2f)", len(train_rows), len(val_rows), cfg.val_ratio)
+    _logger.info(
+        "Manifests written -> train=%d val=%d (ratio=%.2f)",
+        len(train_rows),
+        len(val_rows),
+        cfg.val_ratio,
+    )
     return {
         "train": len(train_rows),
         "val": len(val_rows),

@@ -1,4 +1,5 @@
 """Step 4: audio normalization - resample, loudness normalization, silence trimming."""
+
 from __future__ import annotations
 
 import logging
@@ -19,7 +20,10 @@ def _resample(data: np.ndarray, sr_in: int, sr_out: int) -> tuple[np.ndarray, in
         return data, sr_out
     try:
         import librosa
-        data = librosa.resample(data.astype(np.float32), orig_sr=sr_in, target_sr=sr_out)
+
+        data = librosa.resample(
+            data.astype(np.float32), orig_sr=sr_in, target_sr=sr_out
+        )
     except Exception as e:
         raise RuntimeError(f"resample {sr_in}->{sr_out} failed: {e}") from e
     return data, sr_out
@@ -34,6 +38,7 @@ def _to_mono(data: np.ndarray) -> np.ndarray:
 def _trim_silence(data: np.ndarray, sr: int, top_db: float) -> np.ndarray:
     try:
         import librosa
+
         trimmed, _ = librosa.effects.trim(data.astype(np.float32), top_db=top_db)
         return trimmed
     except Exception:
@@ -43,6 +48,7 @@ def _trim_silence(data: np.ndarray, sr: int, top_db: float) -> np.ndarray:
 def _loudness_normalize(data: np.ndarray, sr: int, target_lufs: float) -> np.ndarray:
     try:
         import pyloudnorm as pyln
+
         meter = pyln.Meter(sr)
         loudness = meter.integrated_loudness(data.astype(np.float32))
         if np.isneginf(loudness) or np.isnan(loudness) or loudness == -np.inf:
@@ -111,5 +117,11 @@ def run_normalize(cfg: common.Config) -> dict[str, Any]:
             failed += 1
             _logger.warning("Normalization failed %s: %s", wav_path.name, msg)
     progress.close()
-    _logger.info("Normalization: ok=%d failed=%d (target=%dHz, %.1f LUFS)", ok, failed, cfg.target_sample_rate, cfg.target_lufs)
+    _logger.info(
+        "Normalization: ok=%d failed=%d (target=%dHz, %.1f LUFS)",
+        ok,
+        failed,
+        cfg.target_sample_rate,
+        cfg.target_lufs,
+    )
     return {"normalized": ok, "failed": failed}

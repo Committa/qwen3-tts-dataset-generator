@@ -13,4 +13,5 @@ output/test_speaker/*
 !inputs/.gitkeep
 !.gitkeep
 .ENV
+poetry.lock
 .env

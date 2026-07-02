@@ -1,22 +1,38 @@
 """CLI pipeline orchestrator."""
+
 from __future__ import annotations
 
 import click
 
+from . import build_manifest as man_mod
 from . import common
 from . import generate as gen_mod
-from . import validate as val_mod
 from . import normalize_audio as norm_mod
-from . import build_manifest as man_mod
 from . import report as rep_mod
+from . import validate as val_mod
 
 STEPS = ["generate", "validate", "normalize", "manifest", "report", "all"]
 
 
 @click.command()
-@click.option("--config", "config_path", default=None, help="Path to config.yaml (default: config.yaml in project root).")
-@click.option("--step", type=click.Choice(STEPS, case_sensitive=False), default="all", help="Run a single pipeline step.")
-@click.option("--no-clean", is_flag=True, default=False, help="Skip auto-clean of workspace on full pipeline run.")
+@click.option(
+    "--config",
+    "config_path",
+    default=None,
+    help="Path to config.yaml (default: config.yaml in project root).",
+)
+@click.option(
+    "--step",
+    type=click.Choice(STEPS, case_sensitive=False),
+    default="all",
+    help="Run a single pipeline step.",
+)
+@click.option(
+    "--no-clean",
+    is_flag=True,
+    default=False,
+    help="Skip auto-clean of workspace on full pipeline run.",
+)
 def main(config_path: str | None, step: str, no_clean: bool) -> None:
     """Orchestrate the TTS dataset pipeline.
 

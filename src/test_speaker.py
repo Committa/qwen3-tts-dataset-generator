@@ -6,6 +6,7 @@ Usage:
     poetry run test-gen-dataset
     poetry run test-gen-dataset --model-size 0.6b
 """
+
 from __future__ import annotations
 
 import logging
@@ -20,10 +21,16 @@ from . import common
 
 def _load_tts(model_id: str, cfg: common.Config, logger: logging.Logger):
     dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16}
-    logger.info("Loading %s (dtype=%s, device_map=%s, attn=%s)",
-                model_id, cfg.dtype, cfg.device_map, cfg.attn_implementation)
+    logger.info(
+        "Loading %s (dtype=%s, device_map=%s, attn=%s)",
+        model_id,
+        cfg.dtype,
+        cfg.device_map,
+        cfg.attn_implementation,
+    )
     try:
         from qwen_tts import Qwen3TTSModel
+
         return Qwen3TTSModel.from_pretrained(
             model_id,
             device_map=cfg.device_map,
@@ -42,9 +49,16 @@ def _load_tts(model_id: str, cfg: common.Config, logger: logging.Logger):
 
 @click.command()
 @click.option("--config", "config_path", default=None, help="Path to config.yaml.")
-@click.option("--model-size", "model_size", default=None, type=click.Choice(["1.7b", "0.6b"], case_sensitive=False),
-              help="Override model_size from config for this test.")
-@click.option("--out-dir", default="output/test_speaker", help="Output directory for test wavs.")
+@click.option(
+    "--model-size",
+    "model_size",
+    default=None,
+    type=click.Choice(["1.7b", "0.6b"], case_sensitive=False),
+    help="Override model_size from config for this test.",
+)
+@click.option(
+    "--out-dir", default="output/test_speaker", help="Output directory for test wavs."
+)
 def main(config_path: str | None, model_size: str | None, out_dir: str) -> None:
     """Run speaker test: generate sample audio for all speakers.
 
@@ -62,7 +76,11 @@ def main(config_path: str | None, model_size: str | None, out_dir: str) -> None:
         cfg.model_size = model_size.lower()
     logger = common.setup_logging(cfg.paths.log_file)
     common.check_cuda_or_die(logger)
-    out_dir_path = (common.PROJECT_ROOT / out_dir) if not Path(out_dir).is_absolute() else Path(out_dir)
+    out_dir_path = (
+        (common.PROJECT_ROOT / out_dir)
+        if not Path(out_dir).is_absolute()
+        else Path(out_dir)
+    )
     out_dir_path.mkdir(parents=True, exist_ok=True)
 
     model = _load_tts(cfg.model_hub_id, cfg, logger)
@@ -71,8 +89,11 @@ def main(config_path: str | None, model_size: str | None, out_dir: str) -> None:
 
     # Load test phrases from inputs/test_sentences.txt
     phrases_path = cfg.paths.test_sentences
-    phrases = [ln.strip() for ln in phrases_path.read_text(encoding="utf-8").splitlines()
-               if ln.strip() and not ln.startswith("#")]
+    phrases = [
+        ln.strip()
+        for ln in phrases_path.read_text(encoding="utf-8").splitlines()
+        if ln.strip() and not ln.startswith("#")
+    ]
     if not phrases:
         logger.warning("No test phrases found in %s", phrases_path)
         return

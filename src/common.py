@@ -1,4 +1,5 @@
 """Shared utilities: config loading, paths, logging, VRAM/OOM handling."""
+
 from __future__ import annotations
 
 import json
@@ -20,16 +21,34 @@ MODEL_HUB_IDS = {
     "0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
 }
 
+LANGUAGE_CODE_MAP: dict[str, str] = {
+    "italian": "it",
+    "english": "en",
+    "french": "fr",
+    "spanish": "es",
+    "portuguese": "pt",
+    "german": "de",
+    "dutch": "nl",
+}
+
+
+def language_code(language_name: str) -> str:
+    code = LANGUAGE_CODE_MAP.get(language_name.lower())
+    if code is not None:
+        return code
+    return language_name.lower()[:2]
+
+
 OOM_HINT = (
     "OutOfMemoryError: not enough VRAM for the selected model.\n"
-    "  -> Set model_size: \"0.6b\" in config.yaml\n"
-    "  -> OR set device_map: \"auto\" for partial CPU offload\n"
+    '  -> Set model_size: "0.6b" in config.yaml\n'
+    '  -> OR set device_map: "auto" for partial CPU offload\n'
     "  -> OR reduce batch_size in config.yaml"
 )
 
 CUDA_HINT = (
     "CUDA is not available on this machine.\n"
-    "  -> Check with: poetry run python -c \"import torch; print(torch.cuda.is_available())\"\n"
+    '  -> Check with: poetry run python -c "import torch; print(torch.cuda.is_available())"\n'
     "  -> On Docker make sure to use: docker run --gpus all ...\n"
     "  -> Without a GPU the pipeline will be extremely slow or will not work."
 )
@@ -154,15 +173,25 @@ def load_config(config_path: str | Path | None = None) -> Config:
 
     p = raw.get("paths", {})
     cfg.paths = Paths(
-        input_sentences=_resolve_path(p.get("input_sentences", "italian_sentences.txt"), is_input=True),
-        test_sentences=_resolve_path(p.get("test_sentences", "test_sentences.txt"), is_input=True),
+        input_sentences=_resolve_path(
+            p.get("input_sentences", "italian_sentences.txt"), is_input=True
+        ),
+        test_sentences=_resolve_path(
+            p.get("test_sentences", "test_sentences.txt"), is_input=True
+        ),
         raw_wav=_resolve_path(p.get("raw_wav", "workspace/raw_wav")),
         accepted_wav=_resolve_path(p.get("accepted_wav", "workspace/accepted_wav")),
         rejected=_resolve_path(p.get("rejected", "workspace/rejected")),
-        manifest_train=_resolve_path(p.get("manifest_train", "workspace/.manifest_train.csv")),
-        manifest_val=_resolve_path(p.get("manifest_val", "workspace/.manifest_val.csv")),
+        manifest_train=_resolve_path(
+            p.get("manifest_train", "workspace/.manifest_train.csv")
+        ),
+        manifest_val=_resolve_path(
+            p.get("manifest_val", "workspace/.manifest_val.csv")
+        ),
         report=_resolve_path(p.get("report", "workspace/.report.json")),
-        checkpoint=_resolve_path(p.get("checkpoint", "workspace/.generate_checkpoint.json")),
+        checkpoint=_resolve_path(
+            p.get("checkpoint", "workspace/.generate_checkpoint.json")
+        ),
         log_file=_resolve_path(p.get("log_file", "logs/pipeline.log")),
     )
     return cfg
@@ -230,7 +259,8 @@ def is_oom_error(exc: BaseException) -> bool:
     msg = str(exc).lower()
     return (
         "out of memory" in msg
-        or "cuda" in msg and "memory" in msg
+        or "cuda" in msg
+        and "memory" in msg
         or isinstance(exc, MemoryError)
     )
 
@@ -251,7 +281,11 @@ def check_cuda_or_die(logger: logging.Logger) -> None:
     if not torch.cuda.is_available():
         logger.error(CUDA_HINT)
         raise SystemExit(1)
-    logger.info("CUDA available: %s (%d GPU)", torch.cuda.get_device_name(0), torch.cuda.device_count())
+    logger.info(
+        "CUDA available: %s (%d GPU)",
+        torch.cuda.get_device_name(0),
+        torch.cuda.device_count(),
+    )
 
 
 def clean_working_dirs(cfg: Config) -> None:
@@ -268,7 +302,12 @@ def clean_working_dirs(cfg: Config) -> None:
             shutil.rmtree(str(d))
             d.mkdir(parents=True, exist_ok=True)
 
-    for f in [cfg.paths.manifest_train, cfg.paths.manifest_val, cfg.paths.report, cfg.paths.checkpoint]:
+    for f in [
+        cfg.paths.manifest_train,
+        cfg.paths.manifest_val,
+        cfg.paths.report,
+        cfg.paths.checkpoint,
+    ]:
         if f.exists():
             f.unlink()
 
@@ -317,8 +356,9 @@ def archive_generation(cfg: Config, gen_number: int) -> None:
         """Rewrite manifest replacing absolute paths with 'wavs/<filename>'."""
         if not src_path.exists():
             return
-        with src_path.open("r", encoding="utf-8") as fin, \
-             dest_path.open("w", encoding="utf-8", newline="") as fout:
+        with src_path.open("r", encoding="utf-8") as fin, dest_path.open(
+            "w", encoding="utf-8", newline=""
+        ) as fout:
             writer = csv.writer(fout, delimiter="|", quoting=csv.QUOTE_MINIMAL)
             for line in fin:
                 parts = line.strip().split("|", 1)
@@ -333,7 +373,10 @@ def archive_generation(cfg: Config, gen_number: int) -> None:
     live_report = cfg.paths.report
     if live_report.exists():
         import shutil as shutil2
+
         shutil2.copy2(str(live_report), str(gen_dir / "report.json"))
 
     logger = logging.getLogger("qwen3_tts_dataset")
-    logger.info("Archived generation %03d: %d wavs -> %s", gen_number, wavs_moved, gen_dir)
+    logger.info(
+        "Archived generation %03d: %d wavs -> %s", gen_number, wavs_moved, gen_dir
+    )

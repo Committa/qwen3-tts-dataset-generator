@@ -1,4 +1,5 @@
 """Step 6: final report with statistics and total audio duration."""
+
 from __future__ import annotations
 
 import json
@@ -14,6 +15,7 @@ _logger: logging.Logger | None = None
 def _audio_duration_seconds(wav_path: Path) -> float:
     try:
         import soundfile as sf
+
         info = sf.info(str(wav_path))
         return float(info.frames) / float(info.samplerate)
     except Exception:
@@ -25,8 +27,13 @@ def _load_sentences(cfg: common.Config) -> list[str]:
     return [ln.strip() for ln in lines if ln.strip() and not ln.startswith("#")]
 
 
-def run_report(cfg: common.Config, generate_stats: dict | None = None, validate_stats: dict | None = None,
-               normalize_stats: dict | None = None, manifest_stats: dict | None = None) -> dict[str, Any]:
+def run_report(
+    cfg: common.Config,
+    generate_stats: dict | None = None,
+    validate_stats: dict | None = None,
+    normalize_stats: dict | None = None,
+    manifest_stats: dict | None = None,
+) -> dict[str, Any]:
     """Generate the final pipeline report with all statistics.
 
     Computes totals from disk state (accepted/rejected wavs, durations) and
@@ -49,7 +56,9 @@ def run_report(cfg: common.Config, generate_stats: dict | None = None, validate_
     sentences = _load_sentences(cfg)
     total_sentences = len(sentences)
 
-    accepted = sorted(cfg.paths.accepted_wav.glob("*.wav"), key=lambda p: int(Path(p.name).stem))
+    accepted = sorted(
+        cfg.paths.accepted_wav.glob("*.wav"), key=lambda p: int(Path(p.name).stem)
+    )
     rejected_files = list(cfg.paths.rejected.glob("*.wav"))
 
     total_duration = 0.0
@@ -79,7 +88,9 @@ def run_report(cfg: common.Config, generate_stats: dict | None = None, validate_
             "target_lufs": cfg.target_lufs,
         },
         "manifest": manifest_stats or {},
-        "generation_time_seconds": round((generate_stats or {}).get("time_seconds", 0.0), 2),
+        "generation_time_seconds": round(
+            (generate_stats or {}).get("time_seconds", 0.0), 2
+        ),
         "model": {
             "model_size": cfg.model_size,
             "speaker": cfg.speaker,
@@ -89,7 +100,9 @@ def run_report(cfg: common.Config, generate_stats: dict | None = None, validate_
     }
 
     cfg.paths.report.parent.mkdir(parents=True, exist_ok=True)
-    cfg.paths.report.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    cfg.paths.report.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     _logger.info("Report written to %s", cfg.paths.report)
     _print_report(report)
     return report
@@ -114,10 +127,16 @@ def _print_report(report: dict[str, Any]) -> None:
     print(f"  Skipped (generation)  : {t['skipped_during_generation']}")
     print("-" * 60)
     q = report["quality"]
-    print(f"  Mean WER              : {q['mean_wer']:.4f}  (threshold {q['wer_threshold']})")
+    print(
+        f"  Mean WER              : {q['mean_wer']:.4f}  (threshold {q['wer_threshold']})"
+    )
     a = report["audio"]
-    print(f"  Total audio duration  : {a['total_duration_hhmmss']} ({a['total_duration_seconds']} s)")
-    print(f"  Sample rate           : {a['sample_rate_hz']} Hz | LUFS target {a['target_lufs']}")
+    print(
+        f"  Total audio duration  : {a['total_duration_hhmmss']} ({a['total_duration_seconds']} s)"
+    )
+    print(
+        f"  Sample rate           : {a['sample_rate_hz']} Hz | LUFS target {a['target_lufs']}"
+    )
     m = report.get("manifest", {})
     if m:
         print("-" * 60)

@@ -1,9 +1,9 @@
 """Step 2: batch audio generation with Qwen3-TTS, checkpoint/resume and OOM handling."""
+
 from __future__ import annotations
 
 import logging
 import time
-from pathlib import Path
 from typing import Any
 
 import soundfile as sf
@@ -31,13 +31,16 @@ def load_tts_model(cfg: common.Config):
         import torch
         from qwen_tts import Qwen3TTSModel
     except ImportError as e:
-        raise RuntimeError(
-            "qwen-tts is not installed. Run `poetry install`."
-        ) from e
+        raise RuntimeError("qwen-tts is not installed. Run `poetry install`.") from e
 
     common.check_cuda_or_die(_logger)
     model_id = cfg.model_hub_id
-    _logger.info("Loading TTS model %s (dtype=%s, device_map=%s)", model_id, cfg.dtype, cfg.device_map)
+    _logger.info(
+        "Loading TTS model %s (dtype=%s, device_map=%s)",
+        model_id,
+        cfg.dtype,
+        cfg.device_map,
+    )
     try:
         model = Qwen3TTSModel.from_pretrained(
             model_id,
@@ -80,7 +83,7 @@ def _generate_batch(
         for w in out:
             wavs.append((w, sr))
         return wavs
-    except MemoryError as e:
+    except MemoryError:
         raise
     except Exception as e:
         if common.is_oom_error(e):
@@ -97,7 +100,9 @@ def run_generate(cfg: common.Config) -> dict[str, Any]:
     sentences_path = cfg.paths.input_sentences
     if not sentences_path.exists():
         raise FileNotFoundError(f"Corpus not found: {sentences_path}")
-    sentences = [ln.strip() for ln in sentences_path.read_text(encoding="utf-8").splitlines()]
+    sentences = [
+        ln.strip() for ln in sentences_path.read_text(encoding="utf-8").splitlines()
+    ]
     sentences = [s for s in sentences if s and not s.startswith("#")]
     total = len(sentences)
     _logger.info("Corpus: %d sentences", total)
@@ -107,7 +112,13 @@ def run_generate(cfg: common.Config) -> dict[str, Any]:
     _logger.info("Already processed: %d | pending: %d", len(done), len(pending_idx))
     if not pending_idx:
         _logger.info("Nothing to do: all sentences have already been generated.")
-        return {"generated": 0, "skipped": 0, "already_done": len(done), "total": total, "time_seconds": 0.0}
+        return {
+            "generated": 0,
+            "skipped": 0,
+            "already_done": len(done),
+            "total": total,
+            "time_seconds": 0.0,
+        }
 
     model = load_tts_model(cfg)
 
@@ -153,7 +164,9 @@ def run_generate(cfg: common.Config) -> dict[str, Any]:
 
     progress.close()
     elapsed = time.time() - start_time
-    _logger.info("Generation completed in %.1fs | new=%d skipped=%d", elapsed, generated, skipped)
+    _logger.info(
+        "Generation completed in %.1fs | new=%d skipped=%d", elapsed, generated, skipped
+    )
     return {
         "generated": generated,
         "skipped": skipped,
