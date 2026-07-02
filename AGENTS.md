@@ -54,6 +54,15 @@ poetry run ruff check src            # lint
 
 - Dockerfile uses `nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04` base. Poetry is installed inside the container (pip only installs Poetry itself). Run with `--gpus all`.
 
+## Optional: flash-attn
+
+`flash-attn` speeds up inference and reduces VRAM usage. Not required — everything works without it (you'll see a benign warning on startup).
+
+**Do NOT add flash-attn to pyproject.toml.** No official wheels for Windows; requires CUDA toolkit + build tools at install time and `--no-build-isolation`. Instead install manually when needed:
+
+- **Docker / Linux:** `pip install flash-attn --no-build-isolation`
+- **Windows:** not supported via pip; use WSL2 or Docker
+
 ## Git / commits
 
 - **Commit messages**: Use Conventional Commits format without scope. Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`.
