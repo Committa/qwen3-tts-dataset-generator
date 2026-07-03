@@ -92,6 +92,7 @@ def run_report(
                 cfg.x_vector_only_mode if cfg.model_type == "base" else None
             ),
             "language": cfg.language,
+            "instruct": cfg.instruct,
             "dtype": cfg.dtype,
         },
     }

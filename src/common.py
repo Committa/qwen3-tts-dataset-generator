@@ -143,6 +143,10 @@ LANGUAGE_CODE_MAP: dict[str, str] = {
     "portuguese": "pt",
     "german": "de",
     "dutch": "nl",
+    "russian": "ru",
+    "chinese": "zh",
+    "japanese": "ja",
+    "korean": "ko",
 }
 
 
