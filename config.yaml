@@ -1,5 +1,5 @@
 model_size: "1.7b"
-model_type: "base"   # "custom_voice" (Qwen preset speakers) | "base" (voice clone from inputs/voices/)
+model_type: "custom_voice"   # "custom_voice" (Qwen preset speakers) | "base" (voice clone from inputs/voices/)
 dtype: "bfloat16"
 device_map: "cuda:0"
 attn_implementation: "sdpa"
@@ -9,8 +9,8 @@ attn_implementation: "sdpa"
 # - custom_voice: name of a built-in Qwen preset speaker (e.g. "Vivian").
 # - base:         name of a custom voice under inputs/voices/<speaker>.wav
 #                 (and <speaker>.txt for ICL mode, see x_vector_only_mode below).
-speaker: "marco"
-language: "italian"
+speaker: "Vivian"
+language: "Auto"
 # custom_voice 1.7B only: style instruction in natural language (ignored by 0.6B model).
 # Example: "Speak in a calm, neutral, declarative tone with falling intonation at sentence endings."
 instruct: "Speak in a calm, neutral, declarative tone with falling intonation at the end of statements. Avoid rising pitch at sentence endings. Speak at a steady pace."
