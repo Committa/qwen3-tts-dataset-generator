@@ -161,7 +161,7 @@ Main parameters:
 
 | Parameter | Default | Notes |
 |---|---|---|
-| `model_size` | `0.6b` | `1.7b` or `0.6b` |
+| `model_size` | `1.7b` | `1.7b` or `0.6b` |
 | `model_type` | `custom_voice` | `custom_voice` (preset speakers) or `base` (voice clone) |
 | `dtype` | `bfloat16` | `bfloat16` or `float16` |
 | `attn_implementation` | `sdpa` | `sdpa` (default), `flash_attention_2` (faster, needs `pip install flash-attn`), or `eager` |
