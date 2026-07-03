@@ -236,7 +236,7 @@ Two cloning modes are supported:
 - **x-vector-only** (`x_vector_only_mode: true`): uses only the speaker embedding,
   no transcript needed. Lower quality.
 
-The extracted `VoiceClonePromptItem` is cached per-voice under `workspace/.voice_cache/` (e.g. `workspace/.voice_cache/my_voice.pt`) and reused across runs; the cache is invalidated automatically when the reference audio, transcript, cloning mode, model type, or model size change. The cache directory is fixed (`workspace/.voice_cache/`) and not user-configurable.
+The extracted `VoiceClonePromptItem` is cached per-voice per-model-size under `workspace/.voice_cache/` (e.g. `workspace/.voice_cache/my_voice_1.7b.pt`) and reused across runs; the cache is invalidated automatically when the reference audio, transcript, cloning mode, model type, or model size change. The cache directory is fixed (`workspace/.voice_cache/`) and not user-configurable.
 
 Test every custom voice before the full run:
 

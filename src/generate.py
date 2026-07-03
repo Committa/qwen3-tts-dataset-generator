@@ -122,8 +122,9 @@ def get_voice_clone_prompt(model, cfg: common.Config, use_cache: bool = True) ->
 
     In ICL mode (x_vector_only_mode=False) the reference transcript ref.txt is
     required; in x-vector-only mode it is ignored. The resulting
-    VoiceClonePromptItem is cached to cfg.paths.prompt_cache keyed by a
-    fingerprint of the reference audio, transcript, mode and model, so that
+    VoiceClonePromptItem is cached to cfg.paths.prompt_cache as
+    <speaker>_<model_size>.pt, keyed by a fingerprint of the
+    reference audio, transcript, mode and model, so that
     re-runs skip the prompt extraction.
 
     Args:
@@ -154,7 +155,7 @@ def get_voice_clone_prompt(model, cfg: common.Config, use_cache: bool = True) ->
         ref_text = ref_text_path.read_text(encoding="utf-8").strip()
 
     cache_dir = cfg.paths.prompt_cache
-    cache_path = cache_dir / f"{cfg.speaker}.pt"
+    cache_path = cache_dir / f"{cfg.speaker}_{cfg.model_size}.pt"
     fp = common.voice_fingerprint(cfg)
     if use_cache and cache_path.exists():
         try:
