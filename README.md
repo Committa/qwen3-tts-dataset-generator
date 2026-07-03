@@ -27,14 +27,40 @@ Italian, English, Chinese, Japanese, Korean, German, French, Russian, Portuguese
 
 ---
 
-## Local Setup (Poetry)
+## Setup
+
+### Prerequisites
+
+- **Python 3.11** (exactly 3.11.x — not 3.10, not 3.12)
+- **Poetry** ([install guide](https://python-poetry.org/docs/#installation)) for dependency management
+- **NVIDIA GPU** with CUDA 12.4+ and up-to-date drivers
+- **Git** to clone the repository
+
+### Clone and install
 
 ```bash
+git clone https://github.com/Committa/qwen3-tts-dataset-generator.git
 cd qwen3-tts-dataset-generator
 poetry lock
 poetry install
 ```
-Verify GPU: `poetry run python -c "import torch; print(torch.cuda.is_available())"`
+
+### Verify GPU
+
+```bash
+poetry run python -c "import torch; print(torch.cuda.is_available())"
+```
+
+Expected output: `True`. If `False`, double-check your NVIDIA drivers and CUDA installation.
+
+### Optional: FlashAttention (faster inference, lower VRAM)
+
+```bash
+pip install flash-attn --no-build-isolation
+```
+
+After installing, set `attn_implementation: "flash_attention_2"` in `config.yaml`.
+Not required — the pipeline works without it (uses `sdpa` by default).
 
 ## Docker Setup
 
@@ -140,18 +166,24 @@ Main parameters:
 | `dtype` | `bfloat16` | `bfloat16` or `float16` |
 | `attn_implementation` | `sdpa` | `sdpa` (default), `flash_attention_2` (faster, needs `pip install flash-attn`), or `eager` |
 | `device_map` | `cuda:0` | `"auto"` for CPU offload with 1.7B on 12 GB |
-| `speaker` | `Vivian` | preset speaker (custom_voice mode only) |
+| `speaker` | `Vivian` | preset speaker name (custom_voice mode only) |
+| `language` | `Auto` | `Auto` for automatic detection, or a language name (`italian`, `english`, etc.) |
+| `instruct` | `""` | voice style instruction in natural language (custom_voice 1.7B only; ignored on 0.6B and base) |
 | `voice.name` | _(none)_ | file stem under `inputs/voices/` (base mode, e.g. `my_voice` → `my_voice.wav`) |
 | `voice.x_vector_only_mode` | `false` | `false`=ICL (best quality, needs `<name>.txt`) \| `true`=x-vector-only |
-| `language` | `Auto` | `Auto` for automatic detection, or a language name (`italian`, `english`, etc.) |
-| `max_new_tokens` | `2048` | Maximum tokens generated per clip |
-| `seed` | `42` | Reproducibility for train/val split and sampling |
+| `voice.prompt_cache` | `workspace/.voice_cache` | per-voice prompt cache directory |
+| `max_new_tokens` | `2048` | maximum tokens generated per clip |
+| `seed` | `42` | reproducibility for train/val split and sampling |
 | `batch_size` | `4` | 4–8 recommended on 12 GB |
 | `asr_model` | `medium` | faster-whisper model size (`tiny`/`base`/`small`/`medium`/`large-v3`) |
-| `wer_threshold` | `0.20` | WER rejection threshold (20%) |
-| `target_sample_rate` | `22050` | Output sample rate in Hz |
-| `target_lufs` | `-23.0` | Loudness normalization target (EBU R128) |
-| `val_ratio` | `0.1` | Fraction of data held out for validation |
+| `asr_device` | `cuda` | `cuda` or `cpu` |
+| `asr_compute_type` | `float16` | `float16`, `int8`, etc. — affects ASR performance |
+| `wer_threshold` | `0.20` | WER rejection threshold (clips above this are rejected) |
+| `target_sample_rate` | `22050` | output sample rate in Hz |
+| `target_lufs` | `-23.0` | loudness normalization target (EBU R128) |
+| `trim_silence_db` | `40` | dB threshold for silence trimming |
+| `val_ratio` | `0.1` | fraction of data held out for validation |
+| `clean_on_full_run` | `true` | auto-clean workspace before a fresh full run (`--no-clean` overrides) |
 
 ### Speakers (CustomVoice)
 
