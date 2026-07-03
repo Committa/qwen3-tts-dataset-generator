@@ -6,6 +6,7 @@ full batch. Test phrases are read from inputs/test_sentences.txt.
 Usage:
     poetry run test-gen-dataset
     poetry run test-gen-dataset --model-size 0.6b
+    poetry run test-gen-dataset --instruct "Speak in a calm, neutral, declarative tone."
 """
 
 from __future__ import annotations
@@ -41,11 +42,19 @@ logger = logging.getLogger(__name__)
     help="Test only this speaker (custom_voice) or voice name (base). "
     "Case-insensitive. Without this flag, all available speakers/voices are tested.",
 )
+@click.option(
+    "--instruct",
+    "instruct",
+    default=None,
+    help="Override instruct text from config.yaml (custom_voice only). "
+    "Pass an empty string to disable instruct for this test.",
+)
 def main(
     config_path: str | None,
     model_size: str | None,
     out_dir: str,
     speaker_filter: str | None,
+    instruct: str | None,
 ) -> None:
     """Run speaker/voice test: generate sample audio for all available voices.
 
@@ -58,10 +67,14 @@ def main(
         model_size: Override model size (1.7b or 0.6b).
         out_dir: Output directory for generated test wavs.
         speaker_filter: Optional speaker/voice name to test (case-insensitive).
+        instruct: Override instruct text (custom_voice only). Pass empty
+            string to disable.
     """
     cfg = common.load_config(config_path)
     if model_size:
         cfg.model_size = model_size.lower()
+    if instruct is not None:
+        cfg.instruct = instruct
     common.setup_logging(cfg.paths.log_file)
 
     # --- Resolve output directory ---
@@ -121,6 +134,7 @@ def _test_custom_voices(
             )
             return
     logger.info("Testing speakers: %s", speakers)
+    logger.info("Instruct: %s", cfg.instruct if cfg.instruct else "(disabled)")
     for speaker in speakers:
         for i, sentence in enumerate(phrases):
             try:
@@ -128,6 +142,7 @@ def _test_custom_voices(
                     text=sentence,
                     language=cfg.language,
                     speaker=speaker,
+                    instruct=cfg.instruct or None,
                     max_new_tokens=cfg.max_new_tokens,
                 )
                 fname = out_dir / f"{speaker}_{i:02d}.wav"
@@ -172,6 +187,8 @@ def _test_base_voices(
             "Create inputs/voices/<name>.wav first."
         )
         return
+    if cfg.instruct:
+        logger.warning("instruct is set but ignored in base mode (custom_voice only).")
     logger.info("Testing voices: %s", voices)
     for voice_name in voices:
         cfg.speaker = voice_name

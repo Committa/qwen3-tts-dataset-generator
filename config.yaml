@@ -1,4 +1,4 @@
-model_size: "0.6b"
+model_size: "1.7b"
 model_type: "custom_voice"   # "custom_voice" (Qwen preset speakers) | "base" (voice clone from inputs/voices/)
 dtype: "bfloat16"
 device_map: "cuda:0"
@@ -11,7 +11,9 @@ attn_implementation: "sdpa"
 #                 (and <speaker>.txt for ICL mode, see x_vector_only_mode below).
 speaker: "Vivian"
 language: "Auto"
-instruct: ""                 # custom_voice only: instruction text passed to the model.
+# custom_voice 1.7B only: style instruction in natural language (ignored by 0.6B model).
+# Example: "Speak in a calm, neutral, declarative tone with falling intonation at sentence endings."
+instruct: "Speak in a calm, neutral, declarative tone with falling intonation at the end of statements. Avoid rising pitch at sentence endings. Speak at a steady pace."
 
 # --- base mode only (ignored in custom_voice) -------------------------
 x_vector_only_mode: false    # false=ICL (best quality, needs inputs/voices/<speaker>.txt)
@@ -21,7 +23,7 @@ x_vector_only_mode: false    # false=ICL (best quality, needs inputs/voices/<spe
 input_sentences: "sentences.txt"        # TTS corpus, one sentence per line
 test_sentences: "test_sentences.txt"    # phrases for `test-gen-dataset`
 
-batch_size: 4
+batch_size: 2
 seed: 42
 max_new_tokens: 2048
 

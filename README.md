@@ -168,7 +168,7 @@ Main parameters:
 | `device_map` | `cuda:0` | `"auto"` for CPU offload with 1.7B on 12 GB |
 | `speaker` | `Vivian` | preset speaker name (custom_voice) or custom voice name under `inputs/voices/` (base) |
 | `language` | `Auto` | `Auto` for automatic detection, or a language name (`italian`, `english`, etc.) |
-| `instruct` | `""` | voice style instruction in natural language (custom_voice 1.7B only; ignored on 0.6B and base) |
+| `instruct` | `""` | style instruction in natural language; works only with `model_size: "1.7b"` in `custom_voice` mode (ignored by `0.6b` and base mode) |
 | `x_vector_only_mode` | `false` | base only: `false`=ICL (best quality, needs `<speaker>.txt`) \| `true`=x-vector-only |
 | `input_sentences` | `sentences.txt` | corpus filename under `inputs/` |
 | `test_sentences` | `test_sentences.txt` | test phrases filename under `inputs/` (used by `test-gen-dataset`) |
@@ -247,8 +247,9 @@ poetry run test-gen-dataset --speaker my_voice   # test a single voice
 
 ## VRAM / OOM
 
-- **1.7B** bf16 ~16 GB → on RTX 4070 (12 GB) use `device_map: "auto"`
-  (slower) or `model_size: 0.6b` (recommended for 12 GB GPUs).
+- **1.7B** bf16 → on RTX 4070 (12 GB) fits with `batch_size: 2` (or lower).
+  If too tight, try `device_map: "auto"` (CPU offload, slower) or fall back to
+  `model_size: "0.6b"`.
 - On OOM: the pipeline saves the checkpoint and prints a clear suggestion.
 - Full run auto-archives the result in `output/gen{NNN}/`. Use `--no-clean` to skip workspace cleanup.
 
