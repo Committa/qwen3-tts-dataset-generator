@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from . import common
 
-_logger: logging.Logger | None = None
+logger = logging.getLogger(__name__)
 
 
 def _build_dtype(dtype_str: str):
@@ -19,23 +19,36 @@ def _build_dtype(dtype_str: str):
 
     mapping = {"bfloat16": torch.bfloat16, "float16": torch.float16}
     if dtype_str not in mapping:
-        raise ValueError(f"dtype non valido: {dtype_str}. Usa bfloat16 o float16.")
+        raise ValueError(f"Invalid dtype: {dtype_str}. Use bfloat16 or float16.")
     return mapping[dtype_str]
 
 
 def load_tts_model(cfg: common.Config):
-    """Load the Qwen3-TTS model. Raises SystemExit with clear message on OOM."""
-    global _logger
-    assert _logger is not None
+    """Load the Qwen3-TTS model.
+
+    Verifies CUDA, loads the model selected by ``cfg.model_hub_id`` with the
+    configured dtype/device/attention backend, seeds torch for reproducibility,
+    and asserts the loaded model type matches the config. On OOM it logs the
+    actionable hint and exits with code 2.
+
+    Args:
+        cfg: Pipeline configuration.
+
+    Returns:
+        The loaded ``Qwen3TTSModel`` instance.
+
+    Raises:
+        SystemExit(2): On GPU out-of-memory.
+    """
     try:
         import torch
         from qwen_tts import Qwen3TTSModel
     except ImportError as e:
         raise RuntimeError("qwen-tts is not installed. Run `poetry install`.") from e
 
-    common.check_cuda_or_die(_logger)
+    common.check_cuda_or_die(logger)
     model_id = cfg.model_hub_id
-    _logger.info(
+    logger.info(
         "Loading TTS model %s (dtype=%s, device_map=%s)",
         model_id,
         cfg.dtype,
@@ -49,13 +62,11 @@ def load_tts_model(cfg: common.Config):
             attn_implementation=cfg.attn_implementation,
         )
     except MemoryError as e:
-        _logger.error(common.OOM_HINT)
-        raise SystemExit(2) from e
+        common.exit_on_oom(e, logger)
     except Exception as e:
         if common.is_oom_error(e):
-            _logger.error(common.OOM_HINT)
-            raise SystemExit(2) from e
-        _logger.error("Error loading TTS model: %s", e)
+            common.exit_on_oom(e, logger)
+        logger.error("Error loading TTS model: %s", e)
         raise
     if cfg.seed is not None:
         torch.manual_seed(cfg.seed)
@@ -67,13 +78,11 @@ def load_tts_model(cfg: common.Config):
             f"Check model_type/model_size in config.yaml."
         )
     if cfg.model_type == "custom_voice":
-        _logger.info(
-            "Available speakers: %s", ", ".join(model.get_supported_speakers())
-        )
+        logger.info("Available speakers: %s", ", ".join(model.get_supported_speakers()))
     else:
         ref_wav, _ = common.resolve_voice_paths(cfg)
         mode = "x-vector-only" if cfg.x_vector_only_mode else "ICL"
-        _logger.info(
+        logger.info(
             "Voice clone: voice='%s' mode=%s ref=%s", cfg.speaker, mode, ref_wav
         )
     return model
@@ -108,9 +117,7 @@ def _rebuild_prompt_item(d: dict) -> "object":
     )
 
 
-def get_voice_clone_prompt(
-    model, cfg: common.Config, logger: logging.Logger, use_cache: bool = True
-) -> list:
+def get_voice_clone_prompt(model, cfg: common.Config, use_cache: bool = True) -> list:
     """Build or load a cached voice-clone prompt for the configured custom voice.
 
     In ICL mode (x_vector_only_mode=False) the reference transcript ref.txt is
@@ -122,7 +129,6 @@ def get_voice_clone_prompt(
     Args:
         model: Loaded Qwen3TTSModel (must be of base type).
         cfg: Pipeline configuration.
-        logger: Logger instance for diagnostic messages.
         use_cache: If True, read/write the on-disk prompt cache. If False the
             prompt is rebuilt from the reference audio without touching the cache.
 
@@ -199,35 +205,23 @@ def _generate_batch(
     Returns:
         List of (wav, sample_rate) tuples.
     """
-    global _logger
-    assert _logger is not None
     n = len(texts)
-    wavs: list[Any] = []
-    try:
-        if cfg.model_type == "base":
-            out, sr = model.generate_voice_clone(
-                text=texts,
-                language=[cfg.language] * n,
-                voice_clone_prompt=voice_clone_prompt,
-                max_new_tokens=cfg.max_new_tokens,
-            )
-        else:
-            out, sr = model.generate_custom_voice(
-                text=texts,
-                language=[cfg.language] * n,
-                speaker=[cfg.speaker] * n,
-                instruct=[cfg.instruct] * n if cfg.instruct else None,
-                max_new_tokens=cfg.max_new_tokens,
-            )
-        for w in out:
-            wavs.append((w, sr))
-        return wavs
-    except MemoryError:
-        raise
-    except Exception as e:
-        if common.is_oom_error(e):
-            raise
-        raise
+    if cfg.model_type == "base":
+        out, sr = model.generate_voice_clone(
+            text=texts,
+            language=[cfg.language] * n,
+            voice_clone_prompt=voice_clone_prompt,
+            max_new_tokens=cfg.max_new_tokens,
+        )
+    else:
+        out, sr = model.generate_custom_voice(
+            text=texts,
+            language=[cfg.language] * n,
+            speaker=[cfg.speaker] * n,
+            instruct=[cfg.instruct] * n if cfg.instruct else None,
+            max_new_tokens=cfg.max_new_tokens,
+        )
+    return [(w, sr) for w in out]
 
 
 def run_generate(cfg: common.Config, only_rejected: bool = False) -> dict[str, Any]:
@@ -236,27 +230,26 @@ def run_generate(cfg: common.Config, only_rejected: bool = False) -> dict[str, A
     Args:
         cfg: Pipeline configuration.
         only_rejected: If True, regenerate only previously rejected clips.
+
+    Returns:
+        Dict with generated/skipped/already_done/total counts and elapsed time.
     """
-    global _logger
-    _logger = common.setup_logging(cfg.paths.log_file)
+    common.setup_logging(cfg.paths.log_file)
     common.ensure_dirs(cfg.paths.raw_wav, cfg.paths.log_file.parent)
 
-    sentences_path = cfg.paths.input_sentences
-    if not sentences_path.exists():
-        raise FileNotFoundError(f"Corpus not found: {sentences_path}")
-    sentences = [
-        ln.strip() for ln in sentences_path.read_text(encoding="utf-8").splitlines()
-    ]
-    sentences = [s for s in sentences if s and not s.startswith("#")]
+    # --- Load corpus ---
+    if not cfg.paths.input_sentences.exists():
+        raise FileNotFoundError(f"Corpus not found: {cfg.paths.input_sentences}")
+    sentences = common.load_sentences(cfg)
     total = len(sentences)
-    _logger.info("Corpus: %d sentences", total)
+    logger.info("Corpus: %d sentences", total)
 
+    # --- Determine which indices still need generation ---
     done = common.read_checkpoint(cfg.paths.checkpoint)
-
     if only_rejected:
         rejected_idx = common.read_rejected_indices(cfg)
         if not rejected_idx:
-            _logger.info("No rejected clips to regenerate.")
+            logger.info("No rejected clips to regenerate.")
             return {
                 "generated": 0,
                 "skipped": 0,
@@ -271,13 +264,13 @@ def run_generate(cfg: common.Config, only_rejected: bool = False) -> dict[str, A
             if old_wav.exists():
                 old_wav.unlink()
         pending_idx = sorted(rejected_idx)
-        _logger.info("Only-rejected mode: %d clips to regenerate", len(pending_idx))
+        logger.info("Only-rejected mode: %d clips to regenerate", len(pending_idx))
     else:
         pending_idx = [i for i in range(total) if i not in done]
-        _logger.info("Already processed: %d | pending: %d", len(done), len(pending_idx))
+        logger.info("Already processed: %d | pending: %d", len(done), len(pending_idx))
 
     if not pending_idx:
-        _logger.info("Nothing to do: all sentences have already been generated.")
+        logger.info("Nothing to do: all sentences have already been generated.")
         return {
             "generated": 0,
             "skipped": 0,
@@ -286,12 +279,13 @@ def run_generate(cfg: common.Config, only_rejected: bool = False) -> dict[str, A
             "time_seconds": 0.0,
         }
 
+    # --- Load model and (for base mode) the voice-clone prompt ---
     model = load_tts_model(cfg)
-
     voice_clone_prompt: list | None = None
     if cfg.model_type == "base":
-        voice_clone_prompt = get_voice_clone_prompt(model, cfg, _logger)
+        voice_clone_prompt = get_voice_clone_prompt(model, cfg)
 
+    # --- Batch generation loop ---
     generated = 0
     skipped = 0
     start_time = time.time()
@@ -305,28 +299,30 @@ def run_generate(cfg: common.Config, only_rejected: bool = False) -> dict[str, A
             wavs = _generate_batch(
                 model, batch_texts, cfg, voice_clone_prompt=voice_clone_prompt
             )
-        except (MemoryError, SystemExit):
+        except SystemExit:
             raise
         except Exception as e:
+            # MemoryError is a subclass of Exception and is treated as OOM:
+            # log the hint, persist checkpoint, and exit with code 2.
             if common.is_oom_error(e):
-                _logger.error(common.OOM_HINT)
                 common.write_checkpoint(cfg.paths.checkpoint, done)
-                raise SystemExit(2) from e
-            _logger.warning("Batch failed (idx %s): %s", batch_idxs, e)
+                common.exit_on_oom(e, logger)
+            logger.warning("Batch failed (idx %s): %s", batch_idxs, e)
             skipped += len(batch_idxs)
             progress.update(len(batch_idxs))
             continue
 
+        # --- Persist each clip in the batch ---
         for idx, (wav, sr) in zip(batch_idxs, wavs):
             if wav is None or len(wav) == 0:
-                _logger.warning("Empty clip at idx %d, skipped.", idx)
+                logger.warning("Empty clip at idx %d, skipped.", idx)
                 skipped += 1
                 continue
             out_path = cfg.paths.raw_wav / f"{idx:06d}.wav"
             try:
                 sf.write(str(out_path), wav, sr)
             except Exception as e:
-                _logger.warning("Save failed for idx %d: %s", idx, e)
+                logger.warning("Save failed for idx %d: %s", idx, e)
                 skipped += 1
                 continue
             generated += 1
@@ -336,7 +332,7 @@ def run_generate(cfg: common.Config, only_rejected: bool = False) -> dict[str, A
 
     progress.close()
     elapsed = time.time() - start_time
-    _logger.info(
+    logger.info(
         "Generation completed in %.1fs | new=%d skipped=%d", elapsed, generated, skipped
     )
     return {

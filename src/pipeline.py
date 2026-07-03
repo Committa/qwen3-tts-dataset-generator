@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import click
 
 from . import build_manifest as man_mod
@@ -10,6 +12,8 @@ from . import generate as gen_mod
 from . import normalize_audio as norm_mod
 from . import report as rep_mod
 from . import validate as val_mod
+
+logger = logging.getLogger(__name__)
 
 STEPS = ["generate", "validate", "normalize", "publish", "all"]
 STEPS_ORDER = ["generate", "validate", "normalize", "publish"]
@@ -121,7 +125,7 @@ def main(
         cfg.paths.report.parent,
         cfg.paths.log_file.parent,
     )
-    logger = common.setup_logging(cfg.paths.log_file)
+    common.setup_logging(cfg.paths.log_file)
 
     # Auto-clean workspace on full run
     if do_clean and cfg.clean_on_full_run and not no_clean:
@@ -134,6 +138,7 @@ def main(
         cfg.model_size,
     )
 
+    # --- Run pipeline steps ---
     gen_stats: dict | None = None
     val_stats: dict | None = None
     norm_stats: dict | None = None
@@ -148,6 +153,7 @@ def main(
             elif s == "normalize":
                 norm_stats = norm_mod.run_normalize(cfg)
             elif s == "publish":
+                # publish = manifest + report + archive
                 man_stats = man_mod.run_build_manifest(cfg)
                 rep_mod.run_report(cfg, gen_stats, val_stats, norm_stats, man_stats)
                 gen_number = common.next_gen_number()

@@ -9,9 +9,10 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.yaml"
@@ -136,7 +137,6 @@ class Config:
     to the default values defined here.
     """
 
-    raw: dict[str, Any] = field(default_factory=dict)
     model_size: str = "0.6b"
     model_type: str = "custom_voice"
     dtype: str = "bfloat16"
@@ -152,13 +152,13 @@ class Config:
     asr_model: str = "medium"
     asr_device: str = "cuda"
     asr_compute_type: str = "float16"
+    asr_workers: int = 1
     wer_threshold: float = 0.15
     target_sample_rate: int = 22050
     target_lufs: float = -23.0
     trim_silence_db: float = 40.0
     val_ratio: float = 0.1
     clean_on_full_run: bool = True
-    test_phrases: list[str] = field(default_factory=list)
     paths: Paths = field(default_factory=Paths)
 
     @property
@@ -191,7 +191,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
         raise FileNotFoundError(f"Config not found: {cfg_path}")
     with cfg_path.open("r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
-    cfg = Config(raw=raw)
+    cfg = Config()
     cfg.model_size = raw.get("model_size", cfg.model_size)
     cfg.model_type = raw.get("model_type", cfg.model_type)
     if cfg.model_type.lower() not in MODEL_HUB_IDS:
@@ -211,6 +211,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
     cfg.asr_model = raw.get("asr_model", cfg.asr_model)
     cfg.asr_device = raw.get("asr_device", cfg.asr_device)
     cfg.asr_compute_type = raw.get("asr_compute_type", cfg.asr_compute_type)
+    cfg.asr_workers = int(raw.get("asr_workers", cfg.asr_workers))
     cfg.wer_threshold = float(raw.get("wer_threshold", cfg.wer_threshold))
     cfg.target_sample_rate = int(raw.get("target_sample_rate", cfg.target_sample_rate))
     cfg.target_lufs = float(raw.get("target_lufs", cfg.target_lufs))
@@ -231,27 +232,34 @@ def load_config(config_path: str | Path | None = None) -> Config:
 
 
 def setup_logging(log_file: Path, level: int = logging.INFO) -> logging.Logger:
-    """Configure dual-output logging (file + stdout).
+    """Configure dual-output logging (file + stdout) for the whole package.
+
+    Configures the shared parent logger ``"src"`` once. Every module obtains its
+    own child logger via ``logging.getLogger(__name__)`` (e.g. ``src.generate``)
+    and inherits these handlers through propagation, so no module needs to keep a
+    mutable global logger or pass one around. The parent does not propagate to
+    the root logger, avoiding duplicate output.
 
     Args:
         log_file: Path to the log file.
         level: Logging level (default: INFO).
 
     Returns:
-        The configured logger instance.
+        The configured parent logger instance (``"src"``).
     """
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("qwen3_tts_dataset")
-    logger.setLevel(level)
-    logger.handlers.clear()
-    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    parent = logging.getLogger("src")
+    parent.setLevel(level)
+    parent.handlers.clear()
+    parent.propagate = False
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     fh = logging.FileHandler(log_file, encoding="utf-8")
     fh.setFormatter(fmt)
     sh = logging.StreamHandler(sys.stdout)
     sh.setFormatter(fmt)
-    logger.addHandler(fh)
-    logger.addHandler(sh)
-    return logger
+    parent.addHandler(fh)
+    parent.addHandler(sh)
+    return parent
 
 
 def ensure_dirs(*dirs: Path) -> None:
@@ -289,13 +297,53 @@ def is_oom_error(exc: BaseException) -> bool:
     Handles MemoryError, torch.cuda.OutOfMemoryError, and generic messages
     containing "out of memory" or "cuda memory".
     """
+    try:
+        import torch
+
+        if isinstance(exc, torch.cuda.OutOfMemoryError):
+            return True
+    except (ImportError, AttributeError):
+        pass
     msg = str(exc).lower()
     return (
         "out of memory" in msg
-        or "cuda" in msg
-        and "memory" in msg
+        or ("cuda" in msg and "memory" in msg)
         or isinstance(exc, MemoryError)
     )
+
+
+def exit_on_oom(exc: BaseException, log: logging.Logger) -> None:
+    """Log the OOM hint and raise SystemExit(2).
+
+    Centralizes the repeated OOM handling so every call site stays consistent:
+    prints the actionable hint and exits with code 2 (OOM), never code 1.
+
+    Args:
+        exc: The exception that triggered the OOM detection.
+        log: Logger instance for the diagnostic message.
+
+    Raises:
+        SystemExit(2): Always.
+    """
+    log.error(OOM_HINT)
+    raise SystemExit(2) from exc
+
+
+def load_sentences(cfg: Config) -> list[str]:
+    """Load the input corpus, skipping blank and comment lines.
+
+    Reads the file at ``cfg.paths.input_sentences`` and returns every non-empty
+    line that does not start with ``#``. This is the single source of truth for
+    corpus loading shared by the generate, validate, manifest and report steps.
+
+    Args:
+        cfg: Pipeline configuration.
+
+    Returns:
+        List of sentences in file order.
+    """
+    lines = cfg.paths.input_sentences.read_text(encoding="utf-8").splitlines()
+    return [ln.strip() for ln in lines if ln.strip() and not ln.startswith("#")]
 
 
 def check_cuda_or_die(logger: logging.Logger) -> None:
@@ -405,11 +453,8 @@ def archive_generation(cfg: Config, gen_number: int) -> None:
     # Copy live report
     live_report = cfg.paths.report
     if live_report.exists():
-        import shutil as shutil2
+        shutil.copy2(str(live_report), str(gen_dir / "report.json"))
 
-        shutil2.copy2(str(live_report), str(gen_dir / "report.json"))
-
-    logger = logging.getLogger("qwen3_tts_dataset")
     logger.info(
         "Archived generation %03d: %d wavs -> %s", gen_number, wavs_moved, gen_dir
     )
@@ -451,7 +496,6 @@ def accept_clips(cfg: Config, indices: list[int]) -> dict[str, int]:
     """
     import shutil
 
-    logger = logging.getLogger("qwen3_tts_dataset")
     accepted = 0
     not_found = 0
     for idx in indices:

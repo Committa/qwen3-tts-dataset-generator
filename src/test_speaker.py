@@ -1,6 +1,7 @@
 """Generate test phrases with all available speakers to pick the best one.
-Also verifies that the selected model (1.7b/0.6b) runs on the GPU before the full batch.
-Test phrases are read from inputs/test_sentences.txt.
+
+Also verifies that the selected model (1.7b/0.6b) runs on the GPU before the
+full batch. Test phrases are read from inputs/test_sentences.txt.
 
 Usage:
     poetry run test-gen-dataset
@@ -14,37 +15,11 @@ from pathlib import Path
 
 import click
 import soundfile as sf
-import torch
 
 from . import common
+from . import generate as gen_mod
 
-
-def _load_tts(model_id: str, cfg: common.Config, logger: logging.Logger):
-    dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16}
-    logger.info(
-        "Loading %s (dtype=%s, device_map=%s, attn=%s)",
-        model_id,
-        cfg.dtype,
-        cfg.device_map,
-        cfg.attn_implementation,
-    )
-    try:
-        from qwen_tts import Qwen3TTSModel
-
-        return Qwen3TTSModel.from_pretrained(
-            model_id,
-            device_map=cfg.device_map,
-            dtype=dtype_map.get(cfg.dtype, torch.bfloat16),
-            attn_implementation=cfg.attn_implementation,
-        )
-    except MemoryError as e:
-        logger.error(common.OOM_HINT)
-        raise SystemExit(2) from e
-    except Exception as e:
-        if common.is_oom_error(e):
-            logger.error(common.OOM_HINT)
-            raise SystemExit(2) from e
-        raise
+logger = logging.getLogger(__name__)
 
 
 @click.command()
@@ -87,8 +62,9 @@ def main(
     cfg = common.load_config(config_path)
     if model_size:
         cfg.model_size = model_size.lower()
-    logger = common.setup_logging(cfg.paths.log_file)
-    common.check_cuda_or_die(logger)
+    common.setup_logging(cfg.paths.log_file)
+
+    # --- Resolve output directory ---
     out_dir_path = (
         (common.PROJECT_ROOT / out_dir)
         if not Path(out_dir).is_absolute()
@@ -96,16 +72,10 @@ def main(
     )
     out_dir_path.mkdir(parents=True, exist_ok=True)
 
-    model = _load_tts(cfg.model_hub_id, cfg, logger)
-    actual_type = getattr(model.model, "tts_model_type", None)
-    if actual_type != cfg.model_type:
-        raise RuntimeError(
-            f"Model type mismatch: config model_type='{cfg.model_type}' "
-            f"but loaded model tts_model_type='{actual_type}'. "
-            f"Check model_type/model_size in config.yaml."
-        )
+    # --- Load model (reuses the shared loader: CUDA check, seed, type assert) ---
+    model = gen_mod.load_tts_model(cfg)
 
-    # Load test phrases from inputs/test_sentences.txt
+    # --- Load test phrases ---
     phrases_path = cfg.paths.test_sentences
     phrases = [
         ln.strip()
@@ -116,17 +86,17 @@ def main(
         logger.warning("No test phrases found in %s", phrases_path)
         return
 
+    # --- Run the appropriate test sweep ---
     if cfg.model_type == "custom_voice":
-        _test_custom_voices(model, cfg, logger, phrases, out_dir_path, speaker_filter)
+        _test_custom_voices(model, cfg, phrases, out_dir_path, speaker_filter)
     else:
-        _test_base_voices(model, cfg, logger, phrases, out_dir_path, speaker_filter)
+        _test_base_voices(model, cfg, phrases, out_dir_path, speaker_filter)
     logger.info("Test completed. Files in: %s", out_dir_path)
 
 
 def _test_custom_voices(
     model,
     cfg: common.Config,
-    logger: logging.Logger,
     phrases: list[str],
     out_dir: Path,
     speaker_filter: str | None,
@@ -136,7 +106,6 @@ def _test_custom_voices(
     Args:
         model: Loaded Qwen3TTSModel.
         cfg: Pipeline configuration.
-        logger: Logger instance.
         phrases: Test phrases to synthesize.
         out_dir: Output directory for test wavs.
         speaker_filter: Optional speaker name to test (case-insensitive).
@@ -164,13 +133,9 @@ def _test_custom_voices(
                 fname = out_dir / f"{speaker}_{i:02d}.wav"
                 sf.write(str(fname), wavs[0], sr)
                 logger.info("OK %s [%d] -> %s", speaker, i, fname.name)
-            except MemoryError as e:
-                logger.error(common.OOM_HINT)
-                raise SystemExit(2) from e
             except Exception as e:
                 if common.is_oom_error(e):
-                    logger.error(common.OOM_HINT)
-                    raise SystemExit(2) from e
+                    common.exit_on_oom(e, logger)
                 logger.warning("Failed %s [%d]: %s", speaker, i, e)
                 continue
 
@@ -178,7 +143,6 @@ def _test_custom_voices(
 def _test_base_voices(
     model,
     cfg: common.Config,
-    logger: logging.Logger,
     phrases: list[str],
     out_dir: Path,
     speaker_filter: str | None,
@@ -188,13 +152,10 @@ def _test_base_voices(
     Args:
         model: Loaded Qwen3TTSModel (base type).
         cfg: Pipeline configuration.
-        logger: Logger instance.
         phrases: Test phrases to synthesize.
         out_dir: Output directory for test wavs.
         speaker_filter: Optional voice name to test (case-insensitive).
     """
-    from . import generate as gen_mod
-
     voices = common.list_available_voices(cfg)
     if speaker_filter:
         voices = [v for v in voices if v.lower() == speaker_filter.lower()]
@@ -208,16 +169,14 @@ def _test_base_voices(
     if not voices:
         logger.warning(
             "No custom voices found under inputs/voices/. "
-            "Create inputs/voices/<name>/ref.wav first."
+            "Create inputs/voices/<name>.wav first."
         )
         return
     logger.info("Testing voices: %s", voices)
     for voice_name in voices:
         cfg.speaker = voice_name
         try:
-            prompt_items = gen_mod.get_voice_clone_prompt(
-                model, cfg, logger, use_cache=True
-            )
+            prompt_items = gen_mod.get_voice_clone_prompt(model, cfg)
         except Exception as e:
             logger.warning("Failed to build prompt for voice '%s': %s", voice_name, e)
             continue
@@ -232,13 +191,9 @@ def _test_base_voices(
                 fname = out_dir / f"{voice_name}_{i:02d}.wav"
                 sf.write(str(fname), wavs[0], sr)
                 logger.info("OK %s [%d] -> %s", voice_name, i, fname.name)
-            except MemoryError as e:
-                logger.error(common.OOM_HINT)
-                raise SystemExit(2) from e
             except Exception as e:
                 if common.is_oom_error(e):
-                    logger.error(common.OOM_HINT)
-                    raise SystemExit(2) from e
+                    common.exit_on_oom(e, logger)
                 logger.warning("Failed %s [%d]: %s", voice_name, i, e)
                 continue
 

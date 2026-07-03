@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from . import common
 
-_logger: logging.Logger | None = None
+logger = logging.getLogger(__name__)
 
 
 def _resample(data: np.ndarray, sr_in: int, sr_out: int) -> tuple[np.ndarray, int]:
@@ -55,7 +55,7 @@ def _loudness_normalize(data: np.ndarray, sr: int, target_lufs: float) -> np.nda
             return data
         return pyln.normalize.loudness(data.astype(np.float32), loudness, target_lufs)
     except Exception as e:
-        _logger and _logger.warning("loudness normalization failed (%s), skipping.", e)
+        logger.warning("loudness normalization failed (%s), skipping.", e)
         return data
 
 
@@ -97,15 +97,15 @@ def run_normalize(cfg: common.Config) -> dict[str, Any]:
     Returns:
         Dict with counts of normalized and failed files.
     """
-    global _logger
-    _logger = common.setup_logging(cfg.paths.log_file)
+    common.setup_logging(cfg.paths.log_file)
 
     accept_dir = cfg.paths.accepted_wav
     files = sorted(accept_dir.glob("*.wav"))
     if not files:
-        _logger.warning("No accepted wav in %s. Run validate step first.", accept_dir)
+        logger.warning("No accepted wav in %s. Run validate step first.", accept_dir)
         return {"normalized": 0, "failed": 0}
 
+    # --- Normalize each accepted clip in-place ---
     ok = 0
     failed = 0
     progress = tqdm(files, desc="normalize", unit="wav")
@@ -115,9 +115,9 @@ def run_normalize(cfg: common.Config) -> dict[str, Any]:
             ok += 1
         else:
             failed += 1
-            _logger.warning("Normalization failed %s: %s", wav_path.name, msg)
+            logger.warning("Normalization failed %s: %s", wav_path.name, msg)
     progress.close()
-    _logger.info(
+    logger.info(
         "Normalization: ok=%d failed=%d (target=%dHz, %.1f LUFS)",
         ok,
         failed,

@@ -9,10 +9,11 @@ from typing import Any
 
 from . import common
 
-_logger: logging.Logger | None = None
+logger = logging.getLogger(__name__)
 
 
 def _audio_duration_seconds(wav_path: Path) -> float:
+    """Return the duration of a wav file in seconds, or 0.0 on error."""
     try:
         import soundfile as sf
 
@@ -20,11 +21,6 @@ def _audio_duration_seconds(wav_path: Path) -> float:
         return float(info.frames) / float(info.samplerate)
     except Exception:
         return 0.0
-
-
-def _load_sentences(cfg: common.Config) -> list[str]:
-    lines = cfg.paths.input_sentences.read_text(encoding="utf-8").splitlines()
-    return [ln.strip() for ln in lines if ln.strip() and not ln.startswith("#")]
 
 
 def run_report(
@@ -50,12 +46,10 @@ def run_report(
     Returns:
         The full report dict.
     """
-    global _logger
-    _logger = common.setup_logging(cfg.paths.log_file)
+    common.setup_logging(cfg.paths.log_file)
 
-    sentences = _load_sentences(cfg)
-    total_sentences = len(sentences)
-
+    # --- Gather disk state ---
+    sentences = common.load_sentences(cfg)
     accepted = sorted(
         cfg.paths.accepted_wav.glob("*.wav"), key=lambda p: int(Path(p.name).stem)
     )
@@ -65,16 +59,15 @@ def run_report(
     for w in accepted:
         total_duration += _audio_duration_seconds(w)
 
+    # --- Assemble report ---
     mean_wer = (validate_stats or {}).get("mean_wer", 0.0)
-    accepted_count = len(accepted)
-    rejected_count = len(rejected_files)
     skipped_gen = (generate_stats or {}).get("skipped", 0)
 
     report = {
         "totals": {
-            "input_sentences": total_sentences,
-            "accepted": accepted_count,
-            "rejected": rejected_count,
+            "input_sentences": len(sentences),
+            "accepted": len(accepted),
+            "rejected": len(rejected_files),
             "skipped_during_generation": skipped_gen,
         },
         "quality": {
@@ -103,16 +96,18 @@ def run_report(
         },
     }
 
+    # --- Write report to disk and print summary ---
     cfg.paths.report.parent.mkdir(parents=True, exist_ok=True)
     cfg.paths.report.write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    _logger.info("Report written to %s", cfg.paths.report)
+    logger.info("Report written to %s", cfg.paths.report)
     _print_report(report)
     return report
 
 
 def _seconds_to_hhmmss(seconds: float) -> str:
+    """Format a duration in seconds as HH:MM:SS.sss."""
     seconds = max(0.0, seconds)
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
@@ -121,6 +116,7 @@ def _seconds_to_hhmmss(seconds: float) -> str:
 
 
 def _print_report(report: dict[str, Any]) -> None:
+    """Print a human-readable summary of the final report to stdout."""
     print("\n" + "=" * 60)
     print("FINAL REPORT - Synthetic TTS dataset")
     print("=" * 60)
