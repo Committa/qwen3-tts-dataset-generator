@@ -167,7 +167,7 @@ Main parameters:
 | `attn_implementation` | `sdpa` | `sdpa` (default), `flash_attention_2` (faster, needs `pip install flash-attn`), or `eager` |
 | `device_map` | `cuda:0` | `"auto"` for CPU offload with 1.7B on 12 GB |
 | `speaker` | `Vivian` | preset speaker name (custom_voice) or custom voice name under `inputs/voices/` (base) |
-| `language` | `Italian` | Explicit language name or ISO 639-1 2-letter code. Supported names: `italian`, `english`, `french`, `spanish`, `portuguese`, `german`, `dutch`, `russian`, `chinese`, `japanese`, `korean`. ISO 2-letter codes (e.g. `it`, `en`, `zh`) are also accepted. `Auto` is **not** supported — it disables WER text normalisation. |
+| `language` | `Italian` | Language name or ISO 639-1 2-letter code. Supported names: `italian`, `english`, `french`, `spanish`, `portuguese`, `german`, `dutch`, `russian`, `chinese`, `japanese`, `korean`. ISO codes (e.g. `it`, `en`, `zh`) are also accepted. |
 | `instruct` | `""` | style instruction in natural language; works only with `model_size: "1.7b"` in `custom_voice` mode (ignored by `0.6b` and base mode) |
 | `x_vector_only_mode` | `false` | base only: `false`=ICL (best quality, needs `<speaker>.txt`) \| `true`=x-vector-only |
 | `input_sentences` | `sentences.txt` | corpus filename under `inputs/` |
