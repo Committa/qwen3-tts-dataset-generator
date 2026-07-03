@@ -13,7 +13,7 @@ attn_implementation: "sdpa"
 #                 (and <speaker>.txt for ICL mode, see x_vector_only_mode below).
 
 speaker: "Vivian"
-language: "Auto"
+language: "Italian"    # explicit language required ("Auto" disables WER normalisation)
 
 # custom_voice 1.7B only: style instruction in natural language (ignored by 0.6B model).
 # Example: "Speak in a calm, neutral, declarative tone with falling intonation at sentence endings."

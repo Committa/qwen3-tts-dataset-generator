@@ -30,6 +30,111 @@ MODEL_HUB_IDS: dict[str, dict[str, str]] = {
 
 VALID_MODEL_TYPES = sorted(MODEL_HUB_IDS.keys())
 
+VALID_ASR_LANG_CODES: frozenset[str] = frozenset(
+    {
+        "af",
+        "am",
+        "ar",
+        "as",
+        "az",
+        "ba",
+        "be",
+        "bg",
+        "bn",
+        "bo",
+        "br",
+        "bs",
+        "ca",
+        "cs",
+        "cy",
+        "da",
+        "de",
+        "el",
+        "en",
+        "es",
+        "et",
+        "eu",
+        "fa",
+        "fi",
+        "fo",
+        "fr",
+        "gl",
+        "gu",
+        "ha",
+        "haw",
+        "he",
+        "hi",
+        "hr",
+        "ht",
+        "hu",
+        "hy",
+        "id",
+        "is",
+        "it",
+        "ja",
+        "jw",
+        "ka",
+        "kk",
+        "km",
+        "kn",
+        "ko",
+        "la",
+        "lb",
+        "ln",
+        "lo",
+        "lt",
+        "lv",
+        "mg",
+        "mi",
+        "mk",
+        "ml",
+        "mn",
+        "mr",
+        "ms",
+        "mt",
+        "my",
+        "ne",
+        "nl",
+        "nn",
+        "no",
+        "oc",
+        "pa",
+        "pl",
+        "ps",
+        "pt",
+        "ro",
+        "ru",
+        "sa",
+        "sd",
+        "si",
+        "sk",
+        "sl",
+        "sn",
+        "so",
+        "sq",
+        "sr",
+        "su",
+        "sv",
+        "sw",
+        "ta",
+        "te",
+        "tg",
+        "th",
+        "tk",
+        "tl",
+        "tr",
+        "tt",
+        "uk",
+        "ur",
+        "uz",
+        "vi",
+        "yi",
+        "yo",
+        "zh",
+        "yue",
+    }
+)
+
 LANGUAGE_CODE_MAP: dict[str, str] = {
     "italian": "it",
     "english": "en",
@@ -42,10 +147,47 @@ LANGUAGE_CODE_MAP: dict[str, str] = {
 
 
 def language_code(language_name: str) -> str:
-    code = LANGUAGE_CODE_MAP.get(language_name.lower())
+    """Convert a language name or ISO code to a faster-whisper-compatible ISO 639-1 code.
+
+    Only explicit languages are accepted — automatic detection ("Auto") is
+    refused because it would disable WER text normalization (alpha2digit),
+    producing silently inaccurate results.
+
+    Args:
+        language_name: Language name (e.g. ``"Italian"``) or ISO 639-1
+            2-letter code (e.g. ``"it"``).
+
+    Returns:
+        A valid faster-whisper ISO 639-1 2-letter code.
+
+    Raises:
+        ValueError: If the value is ``"Auto"`` (or any auto-detect variant)
+            or is not a recognised language name or ISO code.
+    """
+    AUTO_VALUES = {"auto", "autodetect", "auto-detect", "auto detect"}
+    lang = language_name.strip().lower()
+    if lang in AUTO_VALUES:
+        raise ValueError(
+            f"language '{language_name}' is not supported by this pipeline.\n"
+            "  Auto-detection ('Auto') disables WER text normalisation "
+            "(alpha2digit) and is not accepted.\n"
+            '  Set an explicit language in config.yaml, e.g. language: "Italian".'
+        )
+
+    code = LANGUAGE_CODE_MAP.get(lang)
     if code is not None:
         return code
-    return language_name.lower()[:2]
+
+    if len(lang) == 2 and lang in VALID_ASR_LANG_CODES:
+        return lang
+
+    supported_names = sorted(LANGUAGE_CODE_MAP.keys())
+    raise ValueError(
+        f"language '{language_name}' is not recognised.\n"
+        "  Use one of the supported language names or an ISO 639-1 2-letter code.\n"
+        f"  Supported names: {', '.join(supported_names)}.\n"
+        '  Example: language: "Italian" or language: "it".'
+    )
 
 
 OOM_HINT = (
@@ -143,7 +285,7 @@ class Config:
     device_map: str = "cuda:0"
     attn_implementation: str = "sdpa"
     speaker: str = "Vivian"
-    language: str = "Auto"
+    language: str = "Italian"
     instruct: str = ""
     x_vector_only_mode: bool = False
     batch_size: int = 4
@@ -205,6 +347,9 @@ def load_config(config_path: str | Path | None = None) -> Config:
     cfg.attn_implementation = raw.get("attn_implementation", cfg.attn_implementation)
     cfg.speaker = raw.get("speaker", cfg.speaker)
     cfg.language = raw.get("language", cfg.language)
+    language_code(
+        cfg.language
+    )  # validate early — raises ValueError on "Auto" / gibberish
     cfg.instruct = raw.get("instruct", cfg.instruct)
     cfg.x_vector_only_mode = bool(raw.get("x_vector_only_mode", cfg.x_vector_only_mode))
     cfg.batch_size = int(raw.get("batch_size", cfg.batch_size))
