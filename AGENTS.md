@@ -14,7 +14,9 @@ poetry run gen-dataset --step normalize               # single step normalize
 poetry run gen-dataset --step publish                 # manifest + report + archive
 poetry run gen-dataset --from validate                # validate + normalize + publish
 poetry run gen-dataset --accept 7,13                  # manually accept rejected clips
-poetry run test-gen-dataset          # speaker test
+poetry run test-gen-dataset          # speaker test (batched by batch_size)
+poetry run test-gen-dataset --model-type base  # override model_type for the test
+poetry run test-gen-dataset --batch-size 8     # override batch_size for the test
 poetry run gen-dataset --help        # CLI help
 poetry run black src                 # format
 poetry run isort src                 # sort imports (black profile)

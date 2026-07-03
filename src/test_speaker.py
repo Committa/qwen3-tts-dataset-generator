@@ -1,11 +1,14 @@
 """Generate test phrases with all available speakers to pick the best one.
 
 Also verifies that the selected model (1.7b/0.6b) runs on the GPU before the
-full batch. Test phrases are read from inputs/test_sentences.txt.
+full batch. Test phrases are read from inputs/test_sentences.txt. Generation
+is batched by cfg.batch_size (override with --batch-size).
 
 Usage:
     poetry run test-gen-dataset
     poetry run test-gen-dataset --model-size 0.6b
+    poetry run test-gen-dataset --model-type base
+    poetry run test-gen-dataset --batch-size 8
     poetry run test-gen-dataset --instruct "Speak in a calm, neutral, declarative tone."
 """
 
@@ -49,33 +52,54 @@ logger = logging.getLogger(__name__)
     help="Override instruct text from config.yaml (custom_voice only). "
     "Pass an empty string to disable instruct for this test.",
 )
+@click.option(
+    "--batch-size",
+    "batch_size",
+    default=None,
+    type=click.IntRange(min=1),
+    help="Override batch_size from config.yaml for this test "
+    "(higher = faster but more VRAM). Default: use config.yaml batch_size.",
+)
+@click.option(
+    "--model-type",
+    "model_type",
+    default=None,
+    type=click.Choice(["custom_voice", "base"], case_sensitive=False),
+    help="Override model_type from config.yaml for this test. "
+    "custom_voice: sweep preset speakers. "
+    "base: sweep custom voices under inputs/voices/.",
+)
 def main(
     config_path: str | None,
     model_size: str | None,
     out_dir: str,
     speaker_filter: str | None,
     instruct: str | None,
+    batch_size: int | None,
+    model_type: str | None,
 ) -> None:
     """Run speaker/voice test: generate sample audio for all available voices.
 
     In custom_voice mode, tests every built-in speaker with the phrases from
     inputs/test_sentences.txt. In base mode, tests every custom voice found
-    under inputs/voices/. Use --speaker to test a single one.
-
-    Args:
-        config_path: Path to config.yaml (optional).
-        model_size: Override model size (1.7b or 0.6b).
-        out_dir: Output directory for generated test wavs.
-        speaker_filter: Optional speaker/voice name to test (case-insensitive).
-        instruct: Override instruct text (custom_voice only). Pass empty
-            string to disable.
+    under inputs/voices/. Use --speaker to test a single one. Generation is
+    batched (see batch_size in config.yaml or --batch-size).
     """
     cfg = common.load_config(config_path)
     if model_size:
         cfg.model_size = model_size.lower()
+    if model_type:
+        cfg.model_type = model_type.lower()
     if instruct is not None:
         cfg.instruct = instruct
+    if batch_size is not None:
+        cfg.batch_size = batch_size
     common.setup_logging(cfg.paths.log_file)
+    logger.info(
+        "Test batch size: %d (from %s)",
+        cfg.batch_size,
+        "--batch-size" if batch_size is not None else "config.yaml",
+    )
 
     # --- Resolve output directory ---
     out_dir_path = (
@@ -107,6 +131,32 @@ def main(
     logger.info("Test completed. Files in: %s", out_dir_path)
 
 
+def _persist(results, out_dir: Path, prefix: str) -> int:
+    """Write successful clips to out_dir as {prefix}_{i:02d}.wav.
+
+    Args:
+        results: List of (wav, sr) tuples or None, one per phrase.
+        out_dir: Output directory (already exists).
+        prefix: Speaker or voice name used for the filename stem.
+
+    Returns:
+        Number of clips actually written to disk.
+    """
+    written = 0
+    for i, res in enumerate(results):
+        if res is None:
+            continue
+        wav, sr = res
+        fname = out_dir / f"{prefix}_{i:02d}.wav"
+        try:
+            sf.write(str(fname), wav, sr)
+            logger.info("OK %s [%d] -> %s", prefix, i, fname.name)
+            written += 1
+        except Exception as e:
+            logger.warning("Save failed %s [%d]: %s", prefix, i, e)
+    return written
+
+
 def _test_custom_voices(
     model,
     cfg: common.Config,
@@ -115,6 +165,9 @@ def _test_custom_voices(
     speaker_filter: str | None,
 ) -> None:
     """Generate test phrases for every built-in speaker (custom_voice mode).
+
+    Uses generate_phrases (batched by cfg.batch_size) to synthesize all phrases
+    for one speaker in a single sweep, then persists the results.
 
     Args:
         model: Loaded Qwen3TTSModel.
@@ -136,23 +189,14 @@ def _test_custom_voices(
     logger.info("Testing speakers: %s", speakers)
     logger.info("Instruct: %s", cfg.instruct if cfg.instruct else "(disabled)")
     for speaker in speakers:
-        for i, sentence in enumerate(phrases):
-            try:
-                wavs, sr = model.generate_custom_voice(
-                    text=sentence,
-                    language=cfg.language,
-                    speaker=speaker,
-                    instruct=cfg.instruct or None,
-                    max_new_tokens=cfg.max_new_tokens,
-                )
-                fname = out_dir / f"{speaker}_{i:02d}.wav"
-                sf.write(str(fname), wavs[0], sr)
-                logger.info("OK %s [%d] -> %s", speaker, i, fname.name)
-            except Exception as e:
-                if common.is_oom_error(e):
-                    common.exit_on_oom(e, logger)
-                logger.warning("Failed %s [%d]: %s", speaker, i, e)
-                continue
+        results = gen_mod.generate_phrases(
+            model,
+            cfg,
+            phrases,
+            speaker_override=speaker,
+            on_skip=lambda i, r: logger.warning("Skip %s [%d] %s", speaker, i, r),
+        )
+        _persist(results, out_dir, prefix=speaker)
 
 
 def _test_base_voices(
@@ -163,6 +207,11 @@ def _test_base_voices(
     speaker_filter: str | None,
 ) -> None:
     """Generate test phrases for every custom voice under inputs/voices/ (base mode).
+
+    Temporarily sets cfg.speaker to each voice name (needed by
+    get_voice_clone_prompt) and restores it afterwards. Uses generate_phrases
+    (batched by cfg.batch_size) to synthesize all phrases for one voice in a
+    single sweep, then persists the results.
 
     Args:
         model: Loaded Qwen3TTSModel (base type).
@@ -190,29 +239,30 @@ def _test_base_voices(
     if cfg.instruct:
         logger.warning("instruct is set but ignored in base mode (custom_voice only).")
     logger.info("Testing voices: %s", voices)
-    for voice_name in voices:
-        cfg.speaker = voice_name
-        try:
-            prompt_items = gen_mod.get_voice_clone_prompt(model, cfg)
-        except Exception as e:
-            logger.warning("Failed to build prompt for voice '%s': %s", voice_name, e)
-            continue
-        for i, sentence in enumerate(phrases):
+
+    original_speaker = cfg.speaker
+    try:
+        for voice_name in voices:
+            cfg.speaker = voice_name
             try:
-                wavs, sr = model.generate_voice_clone(
-                    text=sentence,
-                    language=cfg.language,
-                    voice_clone_prompt=prompt_items,
-                    max_new_tokens=cfg.max_new_tokens,
-                )
-                fname = out_dir / f"{voice_name}_{i:02d}.wav"
-                sf.write(str(fname), wavs[0], sr)
-                logger.info("OK %s [%d] -> %s", voice_name, i, fname.name)
+                prompt_items = gen_mod.get_voice_clone_prompt(model, cfg)
             except Exception as e:
-                if common.is_oom_error(e):
-                    common.exit_on_oom(e, logger)
-                logger.warning("Failed %s [%d]: %s", voice_name, i, e)
+                logger.warning(
+                    "Failed to build prompt for voice '%s': %s", voice_name, e
+                )
                 continue
+            results = gen_mod.generate_phrases(
+                model,
+                cfg,
+                phrases,
+                voice_clone_prompt=prompt_items,
+                on_skip=lambda i, r: logger.warning(
+                    "Skip %s [%d] %s", voice_name, i, r
+                ),
+            )
+            _persist(results, out_dir, prefix=voice_name)
+    finally:
+        cfg.speaker = original_speaker
 
 
 if __name__ == "__main__":

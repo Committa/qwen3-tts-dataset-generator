@@ -70,7 +70,7 @@ def main(
 ) -> None:
     """Orchestrate the TTS dataset pipeline.
 
-    Steps: generate → validate → normalize → publish
+    Steps: generate -> validate -> normalize -> publish
 
     - generate:  create audio from text corpus via Qwen3-TTS
     - validate:  check clips with ASR (faster-whisper) + WER, accept/reject

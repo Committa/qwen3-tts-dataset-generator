@@ -4,3 +4,17 @@
 Buongiorno, benvenuti alla presentazione del nuovo sistema vocale.
 L'intelligenza artificiale sta trasformando il modo in cui interagiamo con la tecnologia.
 Roma è la città eterna, ricca di storia, arte e cultura millenaria.
+
+# Stress "gn" / "gl" (palatal nasal/lateral)
+Ogni famiglia sogna uno gnocco caldo e un buon bagno rilassante.
+Voglio bene a mio figlio e a mia figlia più di ogni altra cosa.
+
+# Stress "z" vs "s", double consonants, apocope
+Lo zucchero è dolce, ma la sabbia tra i sassi non si mangia mai.
+L'anno scorso ho visto un bel po' di gatti sui tetti di Roma.
+
+# Technical register
+L'algoritmo di clustering k-means partiziona i dati in n sottoinsiemi non vuoti.
+
+# Literary register
+Il vento sussurrava tra i rami, e lei sorrideva in silenzio sotto la luna.

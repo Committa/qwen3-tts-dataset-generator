@@ -147,13 +147,21 @@ poetry run gen-dataset --from normalize
 ```bash
 poetry run test-gen-dataset
 poetry run test-gen-dataset --model-size 0.6b
+poetry run test-gen-dataset --model-type base         # override config.yaml model_type
 poetry run test-gen-dataset --speaker Vivian     # custom_voice: single preset speaker
 poetry run test-gen-dataset --speaker my_voice   # base: single custom voice
+poetry run test-gen-dataset --batch-size 8       # override config.yaml batch_size
 ```
 
 In `custom_voice` mode the sweep covers all built-in speakers; in `base` mode
 it covers every custom voice found under `inputs/voices/`. `--speaker` restricts
-the test to a single one.
+the test to a single one. `--model-type` overrides `model_type` from
+`config.yaml` so both worlds can be tested without editing the config file
+(note: the two model types load different HuggingFace repos, so the model is
+reloaded when switching). Generation is **batched** by `batch_size` from
+`config.yaml` (override with `--batch-size`): each speaker/voice produces
+`ceil(N / batch_size)` model calls instead of N, dramatically reducing the time
+needed to evaluate the whole universe of voices.
 
 ## Config (`config.yaml`)
 
@@ -174,7 +182,7 @@ Main parameters:
 | `test_sentences` | `test_sentences.txt` | test phrases filename under `inputs/` (used by `test-gen-dataset`) |
 | `max_new_tokens` | `2048` | maximum tokens generated per clip |
 | `seed` | `42` | reproducibility for train/val split and sampling |
-| `batch_size` | `4` | 4–8 recommended on 12 GB |
+| `batch_size` | `4` | 4–8 recommended on 12 GB. Used by both `gen-dataset` (generate step) and `test-gen-dataset` (override with `--batch-size`). |
 | `asr_model` | `medium` | faster-whisper model size (`tiny`/`base`/`small`/`medium`/`large-v3`) |
 | `asr_device` | `cuda` | `cuda` or `cpu` |
 | `asr_compute_type` | `float16` | `float16`, `int8`, etc. — affects ASR performance |

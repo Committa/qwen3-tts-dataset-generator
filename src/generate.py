@@ -80,10 +80,11 @@ def load_tts_model(cfg: common.Config):
     if cfg.model_type == "custom_voice":
         logger.info("Available speakers: %s", ", ".join(model.get_supported_speakers()))
     else:
-        ref_wav, _ = common.resolve_voice_paths(cfg)
         mode = "x-vector-only" if cfg.x_vector_only_mode else "ICL"
         logger.info(
-            "Voice clone: voice='%s' mode=%s ref=%s", cfg.speaker, mode, ref_wav
+            "Voice clone mode: mode=%s speaker=%s (reference resolved per-voice)",
+            mode,
+            cfg.speaker,
         )
     return model
 
@@ -191,20 +192,25 @@ def _generate_batch(
     texts: list[str],
     cfg: common.Config,
     voice_clone_prompt: list | None = None,
+    speaker_override: str | None = None,
 ) -> list[tuple[Any, int]]:
-    """Generate a batch of audio clips.
+    """Generate a single batch of audio clips (one model call).
 
-    In custom_voice mode uses generate_custom_voice with the configured speaker;
-    in base mode uses generate_voice_clone with a precomputed voice prompt.
+    In custom_voice mode uses generate_custom_voice with the configured speaker
+    (overridable via speaker_override); in base mode uses generate_voice_clone
+    with a precomputed voice prompt. Expects exactly len(texts) outputs back.
 
     Args:
         model: Loaded Qwen3TTSModel.
-        texts: List of sentences to synthesize.
+        texts: List of sentences to synthesize (one model call, batched).
         cfg: Pipeline configuration.
         voice_clone_prompt: Single-element list of VoiceClonePromptItem (base mode).
+        speaker_override: Speaker name (custom_voice) overriding cfg.speaker.
+            Used by the speaker test to sweep multiple preset speakers without
+            mutating cfg.
 
     Returns:
-        List of (wav, sample_rate) tuples.
+        List of (wav, sample_rate) tuples, one per input text.
     """
     n = len(texts)
     if cfg.model_type == "base":
@@ -215,14 +221,90 @@ def _generate_batch(
             max_new_tokens=cfg.max_new_tokens,
         )
     else:
+        speaker = speaker_override if speaker_override is not None else cfg.speaker
         out, sr = model.generate_custom_voice(
             text=texts,
             language=[cfg.language] * n,
-            speaker=[cfg.speaker] * n,
+            speaker=[speaker] * n,
             instruct=[cfg.instruct] * n if cfg.instruct else None,
             max_new_tokens=cfg.max_new_tokens,
         )
     return [(w, sr) for w in out]
+
+
+def generate_phrases(
+    model,
+    cfg: common.Config,
+    texts: list[str],
+    *,
+    speaker_override: str | None = None,
+    voice_clone_prompt: list | None = None,
+    on_skip=None,
+) -> list[tuple[Any, int] | None]:
+    """Generate audio for a list of phrases, batched by cfg.batch_size.
+
+    Shared helper used by the speaker/voice test utility (test_speaker) and
+    available for any batched inference use case. Wraps the lower-level
+    _generate_batch, chunking the input texts into batches of cfg.batch_size and
+    producing one entry per input sentence, aligned in order.
+
+    Error handling follows the same policy used by run_generate:
+      - GPU out-of-memory (MemoryError or OOM-shaped exception) is fatal and
+        exits the process with code 2 via common.exit_on_oom.
+      - Generic errors on a batch yield None for each clip in the batch plus a
+        warning log, then the loop continues with the next batch.
+      - Empty / zero-length clips inside a successful batch yield None plus a
+        warning.
+
+    Args:
+        model: Loaded Qwen3TTSModel.
+        cfg: Pipeline configuration. Uses batch_size, language, model_type,
+            max_new_tokens and (for custom_voice) instruct.
+        texts: Phrases to synthesize.
+        speaker_override: Optional speaker name overriding cfg.speaker
+            (custom_voice only). Used by the speaker test sweep.
+        voice_clone_prompt: Single-element VoiceClonePromptItem list (base mode).
+        on_skip: Optional callback(i_phrase, reason: str) invoked for each
+            skipped clip (empty output, or every clip in a failed batch).
+            Useful for the test to count failed clips.
+
+    Returns:
+        List of (wav, sample_rate) tuples or None per input sentence, aligned
+        with texts by position.
+    """
+    results: list[tuple[Any, int] | None] = [None] * len(texts)
+    batch = max(1, cfg.batch_size)
+
+    for start in range(0, len(texts), batch):
+        chunk = texts[start : start + batch]
+        try:
+            wavs = _generate_batch(
+                model,
+                chunk,
+                cfg,
+                voice_clone_prompt=voice_clone_prompt,
+                speaker_override=speaker_override,
+            )
+        except SystemExit:
+            raise
+        except Exception as e:
+            if common.is_oom_error(e):
+                common.exit_on_oom(e, logger)
+            logger.warning("Batch failed (start=%d, n=%d): %s", start, len(chunk), e)
+            for i in range(len(chunk)):
+                if on_skip is not None:
+                    on_skip(start + i, f"batch error: {e}")
+            continue
+
+        for i, (wav, sr) in enumerate(wavs):
+            if wav is None or len(wav) == 0:
+                logger.warning("Empty clip at offset %d, skipped.", start + i)
+                if on_skip is not None:
+                    on_skip(start + i, "empty")
+                continue
+            results[start + i] = (wav, sr)
+
+    return results
 
 
 def run_generate(cfg: common.Config, only_rejected: bool = False) -> dict[str, Any]:

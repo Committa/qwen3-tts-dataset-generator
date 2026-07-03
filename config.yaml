@@ -24,9 +24,9 @@ x_vector_only_mode: false    # false=ICL (best quality, needs inputs/voices/<spe
 
 ## Generation ----------------------------------------------------------------
 
-batch_size: 2
+batch_size: 3
 seed: 42
-max_new_tokens: 2048
+max_new_tokens: 512
 
 ## Validation ----------------------------------------------------------------
 
