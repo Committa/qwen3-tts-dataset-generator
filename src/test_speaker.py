@@ -213,7 +213,7 @@ def _test_base_voices(
         return
     logger.info("Testing voices: %s", voices)
     for voice_name in voices:
-        cfg.voice.name = voice_name
+        cfg.speaker = voice_name
         try:
             prompt_items = gen_mod.get_voice_clone_prompt(
                 model, cfg, logger, use_cache=True

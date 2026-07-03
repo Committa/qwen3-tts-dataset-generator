@@ -72,9 +72,9 @@ def load_tts_model(cfg: common.Config):
         )
     else:
         ref_wav, _ = common.resolve_voice_paths(cfg)
-        mode = "x-vector-only" if cfg.voice.x_vector_only_mode else "ICL"
+        mode = "x-vector-only" if cfg.x_vector_only_mode else "ICL"
         _logger.info(
-            "Voice clone: voice='%s' mode=%s ref=%s", cfg.voice.name, mode, ref_wav
+            "Voice clone: voice='%s' mode=%s ref=%s", cfg.speaker, mode, ref_wav
         )
     return model
 
@@ -115,7 +115,7 @@ def get_voice_clone_prompt(
 
     In ICL mode (x_vector_only_mode=False) the reference transcript ref.txt is
     required; in x-vector-only mode it is ignored. The resulting
-    VoiceClonePromptItem is cached to cfg.voice.prompt_cache keyed by a
+    VoiceClonePromptItem is cached to cfg.paths.prompt_cache keyed by a
     fingerprint of the reference audio, transcript, mode and model, so that
     re-runs skip the prompt extraction.
 
@@ -135,20 +135,20 @@ def get_voice_clone_prompt(
     import torch
 
     ref_wav, ref_text_path = common.resolve_voice_paths(cfg)
-    xvec = cfg.voice.x_vector_only_mode
+    xvec = cfg.x_vector_only_mode
     ref_text: str | None = None
     if not xvec:
         if not ref_text_path.exists():
             raise FileNotFoundError(
                 f"Reference transcript not found: {ref_text_path}. "
-                f"ICL mode requires inputs/voices/{cfg.voice.name}.txt. "
-                f"Set voice.x_vector_only_mode: true to skip the transcript "
+                f"ICL mode requires inputs/voices/{cfg.speaker}.txt. "
+                f"Set x_vector_only_mode: true to skip the transcript "
                 f"(lower quality)."
             )
         ref_text = ref_text_path.read_text(encoding="utf-8").strip()
 
-    cache_dir = cfg.voice.prompt_cache
-    cache_path = cache_dir / f"{cfg.voice.name}.pt"
+    cache_dir = cfg.paths.prompt_cache
+    cache_path = cache_dir / f"{cfg.speaker}.pt"
     fp = common.voice_fingerprint(cfg)
     if use_cache and cache_path.exists():
         try:

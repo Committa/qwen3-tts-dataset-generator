@@ -62,53 +62,75 @@ CUDA_HINT = (
 )
 
 
+def _resolve_path(p: str | os.PathLike[str], is_input: bool = False) -> Path:
+    """Resolve a path relative to the project root (or inputs/ if is_input).
+
+    Absolute paths are returned unchanged. Relative paths are joined to
+    PROJECT_ROOT; with is_input=True they are joined to PROJECT_ROOT/inputs/.
+
+    Args:
+        p: Path string or PathLike.
+        is_input: If True, resolve relative to inputs/ rather than root.
+
+    Returns:
+        An absolute Path.
+    """
+    path = Path(p)
+    if path.is_absolute():
+        return path
+    if is_input:
+        return PROJECT_ROOT / "inputs" / path
+    return PROJECT_ROOT / path
+
+
 @dataclass
 class Paths:
     """Container for all file/directory paths used by the pipeline.
 
     All paths are resolved relative to the project root unless absolute.
+    Only `input_sentences` and `test_sentences` are configurable from
+    config.yaml; every other path is a fixed default defined here and not
+    exposed to users, since the workspace layout is an internal contract of
+    the pipeline (the user-facing output lives under output/gen{NNN}/).
     """
 
-    input_sentences: Path
-    test_sentences: Path
-    raw_wav: Path
-    accepted_wav: Path
-    rejected: Path
-    manifest_train: Path
-    manifest_val: Path
-    report: Path
-    checkpoint: Path
-    log_file: Path
-
-
-@dataclass
-class VoiceConfig:
-    """Configuration for a custom voice used in voice-clone (base) mode.
-
-    A custom voice lives under inputs/voices/<name>.wav and is defined by a
-    reference audio clip (<name>.wav) plus, for ICL mode, its transcript
-    (<name>.txt).
-
-    Attributes:
-        name: Voice directory name under inputs/voices/. Resolved to
-            inputs/voices/<name>/ref.wav and inputs/voices/<name>/ref.txt.
-        x_vector_only_mode: If True, clone using only the speaker embedding
-            (no transcript needed, lower quality). If False, use ICL mode
-            (better quality, requires ref.txt).
-        prompt_cache: Path to the cached VoiceClonePromptItem file, used to
-            avoid re-extracting the prompt on every run.
-    """
-
-    name: str = ""
-    x_vector_only_mode: bool = False
+    input_sentences: Path = field(
+        default_factory=lambda: _resolve_path("sentences.txt", is_input=True)
+    )
+    test_sentences: Path = field(
+        default_factory=lambda: _resolve_path("test_sentences.txt", is_input=True)
+    )
+    raw_wav: Path = field(default_factory=lambda: _resolve_path("workspace/raw_wav"))
+    accepted_wav: Path = field(
+        default_factory=lambda: _resolve_path("workspace/accepted_wav")
+    )
+    rejected: Path = field(default_factory=lambda: _resolve_path("workspace/rejected"))
+    manifest_train: Path = field(
+        default_factory=lambda: _resolve_path("workspace/.manifest_train.csv")
+    )
+    manifest_val: Path = field(
+        default_factory=lambda: _resolve_path("workspace/.manifest_val.csv")
+    )
+    report: Path = field(
+        default_factory=lambda: _resolve_path("workspace/.report.json")
+    )
+    checkpoint: Path = field(
+        default_factory=lambda: _resolve_path("workspace/.generate_checkpoint.json")
+    )
+    log_file: Path = field(default_factory=lambda: _resolve_path("logs/pipeline.log"))
     prompt_cache: Path = field(
-        default_factory=lambda: Path("workspace/.voice_cache")
+        default_factory=lambda: _resolve_path("workspace/.voice_cache")
     )
 
 
 @dataclass
 class Config:
     """All configuration parameters parsed from config.yaml.
+
+    The `speaker` field is the voice identity for both modes: a built-in
+    preset speaker name when model_type="custom_voice", or a custom voice
+    name under inputs/voices/<speaker>.wav (+ optional <speaker>.txt) when
+    model_type="base".
 
     Attributes are set from the YAML file by load_config(), falling back
     to the default values defined here.
@@ -123,6 +145,7 @@ class Config:
     speaker: str = "Vivian"
     language: str = "Auto"
     instruct: str = ""
+    x_vector_only_mode: bool = False
     batch_size: int = 4
     seed: int = 42
     max_new_tokens: int = 2048
@@ -136,21 +159,7 @@ class Config:
     val_ratio: float = 0.1
     clean_on_full_run: bool = True
     test_phrases: list[str] = field(default_factory=list)
-    voice: VoiceConfig = field(default_factory=VoiceConfig)
-    paths: Paths = field(
-        default_factory=lambda: Paths(
-            input_sentences=Path("."),
-            test_sentences=Path("."),
-            raw_wav=Path("."),
-            accepted_wav=Path("."),
-            rejected=Path("."),
-            manifest_train=Path("."),
-            manifest_val=Path("."),
-            report=Path("."),
-            checkpoint=Path("."),
-            log_file=Path("."),
-        )
-    )
+    paths: Paths = field(default_factory=Paths)
 
     @property
     def model_hub_id(self) -> str:
@@ -162,15 +171,6 @@ class Config:
                 f"Invalid model_type/model_size: '{self.model_type}'/'{self.model_size}'. "
                 f"Valid model_type: {VALID_MODEL_TYPES}; valid model_size: 0.6b, 1.7b."
             ) from exc
-
-
-def _resolve_path(p: str | os.PathLike[str], is_input: bool = False) -> Path:
-    path = Path(p)
-    if path.is_absolute():
-        return path
-    if is_input:
-        return PROJECT_ROOT / "inputs" / path
-    return PROJECT_ROOT / path
 
 
 def load_config(config_path: str | Path | None = None) -> Config:
@@ -204,6 +204,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
     cfg.speaker = raw.get("speaker", cfg.speaker)
     cfg.language = raw.get("language", cfg.language)
     cfg.instruct = raw.get("instruct", cfg.instruct)
+    cfg.x_vector_only_mode = bool(raw.get("x_vector_only_mode", cfg.x_vector_only_mode))
     cfg.batch_size = int(raw.get("batch_size", cfg.batch_size))
     cfg.seed = int(raw.get("seed", cfg.seed))
     cfg.max_new_tokens = int(raw.get("max_new_tokens", cfg.max_new_tokens))
@@ -217,36 +218,15 @@ def load_config(config_path: str | Path | None = None) -> Config:
     cfg.val_ratio = float(raw.get("val_ratio", cfg.val_ratio))
     cfg.clean_on_full_run = bool(raw.get("clean_on_full_run", cfg.clean_on_full_run))
 
-    p = raw.get("paths", {})
     cfg.paths = Paths(
         input_sentences=_resolve_path(
-            p.get("input_sentences", "sentences.txt"), is_input=True
+            raw.get("input_sentences", "sentences.txt"), is_input=True
         ),
         test_sentences=_resolve_path(
-            p.get("test_sentences", "test_sentences.txt"), is_input=True
+            raw.get("test_sentences", "test_sentences.txt"), is_input=True
         ),
-        raw_wav=_resolve_path(p.get("raw_wav", "workspace/raw_wav")),
-        accepted_wav=_resolve_path(p.get("accepted_wav", "workspace/accepted_wav")),
-        rejected=_resolve_path(p.get("rejected", "workspace/rejected")),
-        manifest_train=_resolve_path(
-            p.get("manifest_train", "workspace/.manifest_train.csv")
-        ),
-        manifest_val=_resolve_path(
-            p.get("manifest_val", "workspace/.manifest_val.csv")
-        ),
-        report=_resolve_path(p.get("report", "workspace/.report.json")),
-        checkpoint=_resolve_path(
-            p.get("checkpoint", "workspace/.generate_checkpoint.json")
-        ),
-        log_file=_resolve_path(p.get("log_file", "logs/pipeline.log")),
     )
 
-    v = raw.get("voice") or {}
-    cfg.voice = VoiceConfig(
-        name=v.get("name", ""),
-        x_vector_only_mode=bool(v.get("x_vector_only_mode", False)),
-        prompt_cache=_resolve_path(v.get("prompt_cache", "workspace/.voice_cache")),
-    )
     return cfg
 
 
@@ -496,10 +476,10 @@ def accept_clips(cfg: Config, indices: list[int]) -> dict[str, int]:
 
 
 def resolve_voice_paths(cfg: Config) -> tuple[Path, Path]:
-    """Resolve the reference audio and transcript paths for the configured custom voice.
+    """Resolve the reference audio and transcript paths for the configured speaker.
 
-    The voice files live directly under inputs/voices/ as <voice.name>.wav (always)
-    and <voice.name>.txt (required only for ICL mode, i.e. when x_vector_only_mode is False).
+    The voice files live directly under inputs/voices/ as <speaker>.wav (always)
+    and <speaker>.txt (required only for ICL mode, i.e. when x_vector_only_mode is False).
 
     Args:
         cfg: Pipeline configuration.
@@ -508,21 +488,21 @@ def resolve_voice_paths(cfg: Config) -> tuple[Path, Path]:
         A (ref_wav, ref_text) tuple of absolute paths.
 
     Raises:
-        ValueError: If voice.name is empty.
-        FileNotFoundError: If <voice.name>.wav does not exist.
+        ValueError: If speaker is empty.
+        FileNotFoundError: If <speaker>.wav does not exist.
     """
-    if not cfg.voice.name:
+    if not cfg.speaker:
         raise ValueError(
-            "voice.name is required when model_type='base'. "
-            "Set voice.name in config.yaml to a voice name under inputs/voices/."
+            "speaker is required when model_type='base'. "
+            "Set speaker in config.yaml to a voice name under inputs/voices/."
         )
     voices_dir = PROJECT_ROOT / "inputs" / "voices"
-    ref_wav = voices_dir / f"{cfg.voice.name}.wav"
-    ref_text = voices_dir / f"{cfg.voice.name}.txt"
+    ref_wav = voices_dir / f"{cfg.speaker}.wav"
+    ref_text = voices_dir / f"{cfg.speaker}.txt"
     if not ref_wav.exists():
         raise FileNotFoundError(
             f"Reference audio not found: {ref_wav}. "
-            f"Place a wav file at inputs/voices/{cfg.voice.name}.wav."
+            f"Place a wav file at inputs/voices/{cfg.speaker}.wav."
         )
     return ref_wav, ref_text
 
@@ -567,7 +547,7 @@ def voice_fingerprint(cfg: Config) -> str:
     h = hashlib.sha256()
     h.update(cfg.model_type.encode("utf-8"))
     h.update(cfg.model_size.encode("utf-8"))
-    h.update(str(cfg.voice.x_vector_only_mode).encode("utf-8"))
+    h.update(str(cfg.x_vector_only_mode).encode("utf-8"))
     h.update(ref_wav.resolve().as_posix().encode("utf-8"))
     st = ref_wav.stat()
     h.update(str(st.st_mtime).encode("utf-8"))

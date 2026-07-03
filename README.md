@@ -78,7 +78,7 @@ docker run --rm --gpus all \
 
 Prepare your text corpus as a plain text file, one sentence per line.
 Lines starting with `#` and blank lines are ignored. The default path is
-`inputs/sentences.txt` (configured via `paths.input_sentences` in
+`inputs/sentences.txt` (configured via `input_sentences` in
 `config.yaml`). The sample file included in the repo contains placeholder
 sentences for testing. Works with any language supported by Qwen3-TTS.
 
@@ -166,12 +166,12 @@ Main parameters:
 | `dtype` | `bfloat16` | `bfloat16` or `float16` |
 | `attn_implementation` | `sdpa` | `sdpa` (default), `flash_attention_2` (faster, needs `pip install flash-attn`), or `eager` |
 | `device_map` | `cuda:0` | `"auto"` for CPU offload with 1.7B on 12 GB |
-| `speaker` | `Vivian` | preset speaker name (custom_voice mode only) |
+| `speaker` | `Vivian` | preset speaker name (custom_voice) or custom voice name under `inputs/voices/` (base) |
 | `language` | `Auto` | `Auto` for automatic detection, or a language name (`italian`, `english`, etc.) |
 | `instruct` | `""` | voice style instruction in natural language (custom_voice 1.7B only; ignored on 0.6B and base) |
-| `voice.name` | _(none)_ | file stem under `inputs/voices/` (base mode, e.g. `my_voice` → `my_voice.wav`) |
-| `voice.x_vector_only_mode` | `false` | `false`=ICL (best quality, needs `<name>.txt`) \| `true`=x-vector-only |
-| `voice.prompt_cache` | `workspace/.voice_cache` | per-voice prompt cache directory |
+| `x_vector_only_mode` | `false` | base only: `false`=ICL (best quality, needs `<speaker>.txt`) \| `true`=x-vector-only |
+| `input_sentences` | `sentences.txt` | corpus filename under `inputs/` |
+| `test_sentences` | `test_sentences.txt` | test phrases filename under `inputs/` (used by `test-gen-dataset`) |
 | `max_new_tokens` | `2048` | maximum tokens generated per clip |
 | `seed` | `42` | reproducibility for train/val split and sampling |
 | `batch_size` | `4` | 4–8 recommended on 12 GB |
@@ -224,10 +224,8 @@ Configuration:
 
 ```yaml
 model_type: "base"
-voice:
-  name: "my_voice"            # -> inputs/voices/my_voice.wav + my_voice.txt
-  x_vector_only_mode: false   # false=ICL (best quality, needs ref.txt) | true=x-vector-only
-  prompt_cache: "workspace/.voice_cache"
+speaker: "my_voice"           # -> inputs/voices/my_voice.wav + my_voice.txt
+x_vector_only_mode: false     # false=ICL (best quality, needs my_voice.txt) | true=x-vector-only
 ```
 
 Two cloning modes are supported:
@@ -237,8 +235,7 @@ Two cloning modes are supported:
 - **x-vector-only** (`x_vector_only_mode: true`): uses only the speaker embedding,
   no transcript needed. Lower quality.
 
-The extracted `VoiceClonePromptItem` is cached per-voice under `workspace/.voice_cache/` (e.g. `workspace/.voice_cache/my_voice.pt`) and reused across runs; the cache is invalidated automatically when the
-reference audio, transcript, cloning mode, model type, or model size change.
+The extracted `VoiceClonePromptItem` is cached per-voice under `workspace/.voice_cache/` (e.g. `workspace/.voice_cache/my_voice.pt`) and reused across runs; the cache is invalidated automatically when the reference audio, transcript, cloning mode, model type, or model size change. The cache directory is fixed (`workspace/.voice_cache/`) and not user-configurable.
 
 Test every custom voice before the full run:
 

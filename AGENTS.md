@@ -30,7 +30,7 @@ poetry run ruff check src            # lint
 ## Architecture
 
 - Entry point: `gen-dataset` (from `src/pipeline.py` via Poetry script alias `[tool.poetry.scripts]`). Do NOT run `python src/pipeline.py` directly — relative imports will fail.
-- `src/common.py` defines `Config`/`Paths`/`VoiceConfig` dataclasses, `PROJECT_ROOT`, and all shared helpers (logging, checkpoint, OOM detection). All other modules import from here.
+- `src/common.py` defines `Config`/`Paths` dataclasses, `PROJECT_ROOT`, and all shared helpers (logging, checkpoint, OOM detection). All other modules import from here. The `speaker` field on `Config` is the voice identity for both modes (preset name for `custom_voice`, custom voice name under `inputs/voices/` for `base`); `x_vector_only_mode` is a flattened top-level field used only in `base` mode. The `Paths` dataclass holds all pipeline paths: only `input_sentences` and `test_sentences` are configurable in `config.yaml` (top-level keys); all other paths (`raw_wav`, `accepted_wav`, `rejected`, manifests, `report`, `checkpoint`, `log_file`, `prompt_cache`) are fixed defaults defined in `_RUNTIME_PATH_DEFAULTS` and resolved relative to `PROJECT_ROOT`.
 - Config paths in `config.yaml` are resolved relative to `PROJECT_ROOT` (= repo root, computed as `Path(__file__).resolve().parent.parent` in `common.py`).
 - Pipeline steps: `generate` → `validate` → `normalize` → `manifest` → `report`. Each can run standalone via `--step`.
 
@@ -38,7 +38,7 @@ poetry run ruff check src            # lint
 
 - `config.model_type` selects the Qwen3-TTS model variant: `custom_voice` (preset speakers via `generate_custom_voice`) or `base` (voice cloning via `generate_voice_clone`). The `qwen-tts` library validates `model.tts_model_type` at runtime and raises `ValueError` on mismatch; `generate.load_tts_model` also asserts this up front.
 - `MODEL_HUB_IDS` in `common.py` is nested `{model_type: {model_size: repo_id}}`. Base repos: `Qwen/Qwen3-TTS-12Hz-{0.6b,1.7b}-Base`.
-- Custom voices (base mode) live as `<name>.wav` (required) and `<name>.txt` (required for ICL mode, optional for x-vector-only) directly under `inputs/voices/`. Helpers: `common.resolve_voice_paths`, `common.list_available_voices`, `common.voice_fingerprint`.
+- Custom voices (base mode) live as `<speaker>.wav` (required) and `<speaker>.txt` (required for ICL mode, optional for x-vector-only) directly under `inputs/voices/`. The `speaker` field selects which one to use. Helpers: `common.resolve_voice_paths`, `common.list_available_voices`, `common.voice_fingerprint`.
 - `generate.get_voice_clone_prompt` extracts a `VoiceClonePromptItem` once (cached per-voice under `workspace/.voice_cache/`, invalidated by fingerprint) and broadcasts it over every batch. The `--only-rejected` regenerate path reuses the same cache.
 - `test_speaker.py` sweeps the universe of the configured `model_type` (preset speakers for `custom_voice`, all voices under `inputs/voices/` for `base`); `--speaker NAME` restricts to one. Both worlds cannot be tested in a single run (different model).
 - Downstream steps (`validate`, `normalize`, `manifest`, `report`) are model-type-agnostic: the model always returns `(wavs, sr)`. Only `generate` and `report` (model section) branch on `model_type`.

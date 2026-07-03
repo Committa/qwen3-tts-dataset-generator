@@ -1,22 +1,25 @@
 model_size: "0.6b"
-model_type: "custom_voice"   # "custom_voice" (preset speakers) | "base" (voice clone)
+model_type: "custom_voice"   # "custom_voice" (Qwen preset speakers) | "base" (voice clone from inputs/voices/)
 dtype: "bfloat16"
 device_map: "cuda:0"
 attn_implementation: "sdpa"
 
-# --- custom_voice mode (preset speakers) ---
+# --- voice identity (both modes) --------------------------------------
+# Speaker is the voice identity for BOTH modes:
+# - custom_voice: name of a built-in Qwen preset speaker (e.g. "Vivian").
+# - base:         name of a custom voice under inputs/voices/<speaker>.wav
+#                 (and <speaker>.txt for ICL mode, see x_vector_only_mode below).
 speaker: "Vivian"
 language: "Auto"
-instruct: ""
+instruct: ""                 # custom_voice only: instruction text passed to the model.
 
-# --- base mode (voice clone from a reference audio) ---
-# Uncomment and set model_type: "base" above to clone a custom voice.
-# Place the reference audio at inputs/voices/<name>.wav and, for ICL mode
-# (recommended), the transcript at inputs/voices/<name>.txt.
-voice:
-  name: "my_voice"            # -> inputs/voices/my_voice.wav + my_voice.txt
-  x_vector_only_mode: false   # false=ICL (best quality, needs my_voice.txt) | true=x-vector-only
-  prompt_cache: "workspace/.voice_cache"
+# --- base mode only (ignored in custom_voice) -------------------------
+x_vector_only_mode: false    # false=ICL (best quality, needs inputs/voices/<speaker>.txt)
+                             # true = x-vector-only (no transcript needed, lower quality)
+
+# --- corpus inputs (under inputs/) ------------------------------------
+input_sentences: "sentences.txt"        # TTS corpus, one sentence per line
+test_sentences: "test_sentences.txt"    # phrases for `test-gen-dataset`
 
 batch_size: 4
 seed: 42
@@ -32,17 +35,5 @@ target_lufs: -23.0
 trim_silence_db: 40
 
 val_ratio: 0.1
-
-paths:
-  input_sentences: "sentences.txt"
-  test_sentences: "test_sentences.txt"
-  raw_wav: "workspace/raw_wav"
-  accepted_wav: "workspace/accepted_wav"
-  rejected: "workspace/rejected"
-  manifest_train: "workspace/.manifest_train.csv"
-  manifest_val: "workspace/.manifest_val.csv"
-  report: "workspace/.report.json"
-  checkpoint: "workspace/.generate_checkpoint.json"
-  log_file: "logs/pipeline.log"
 
 clean_on_full_run: true
