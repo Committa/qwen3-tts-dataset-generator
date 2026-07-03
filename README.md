@@ -178,7 +178,7 @@ Main parameters:
 | `asr_model` | `medium` | faster-whisper model size (`tiny`/`base`/`small`/`medium`/`large-v3`) |
 | `asr_device` | `cuda` | `cuda` or `cpu` |
 | `asr_compute_type` | `float16` | `float16`, `int8`, etc. — affects ASR performance |
-| `asr_workers` | `1` | parallel ASR transcriptions (`1`=sequential; `>1`=thread pool, faster-whisper releases the GIL) |
+| `asr_workers` | `1` | parallel ASR transcriptions (`1`=sequential; `>1`=thread pool, faster-whisper runs them concurrently via `num_workers`; memory grows with workers) |
 | `wer_threshold` | `0.20` | WER rejection threshold (clips above this are rejected) |
 | `target_sample_rate` | `22050` | output sample rate in Hz |
 | `target_lufs` | `-23.0` | loudness normalization target (EBU R128) |

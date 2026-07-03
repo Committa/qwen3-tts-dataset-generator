@@ -6,7 +6,6 @@ import json
 import logging
 import re
 import shutil
-import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -53,12 +52,19 @@ def _wer(reference: str, hypothesis: str, lang_code: str | None = None) -> float
 
 
 def _load_asr(cfg: common.Config):
-    """Load the faster-whisper ASR model, falling back to CPU if CUDA is unavailable."""
+    """Load the faster-whisper ASR model, falling back to CPU if CUDA is unavailable.
+
+    ``num_workers`` is forwarded to faster-whisper (maps to CTranslate2
+    ``inter_threads``) so that concurrent ``transcribe()`` calls from a thread
+    pool run with true parallelism, as documented by the library. Memory usage
+    grows with the number of workers.
+    """
     from faster_whisper import WhisperModel
 
     model_name = cfg.asr_model
     device = cfg.asr_device
     compute_type = cfg.asr_compute_type
+    num_workers = max(1, cfg.asr_workers)
     if device == "cuda":
         try:
             import torch
@@ -69,12 +75,18 @@ def _load_asr(cfg: common.Config):
         except ImportError:
             device, compute_type = "cpu", "int8"
     logger.info(
-        "Loading ASR faster-whisper '%s' (device=%s, ct=%s)",
+        "Loading ASR faster-whisper '%s' (device=%s, ct=%s, workers=%d)",
         model_name,
         device,
         compute_type,
+        num_workers,
     )
-    return WhisperModel(model_name, device=device, compute_type=compute_type)
+    return WhisperModel(
+        model_name,
+        device=device,
+        compute_type=compute_type,
+        num_workers=num_workers,
+    )
 
 
 def _transcribe(asr_model, wav_path: Path, lang_code: str) -> str:
@@ -95,13 +107,12 @@ def _validate_one(
     asr_model,
     lang_code: str,
     cfg: common.Config,
-    asr_lock: threading.Lock,
 ) -> dict[str, Any]:
     """Transcribe one clip, compute WER, and decide accept/reject.
 
-    The transcription call is guarded by ``asr_lock`` because faster-whisper is
-    not guaranteed thread-safe on a shared model instance; WER computation runs
-    outside the lock so it can overlap with other threads' transcriptions.
+    faster-whisper supports concurrent ``transcribe()`` calls on a shared model
+    instance (via ``num_workers``), so no external lock is needed: this function
+    is safe to submit to a thread pool.
 
     Args:
         wav_path: Path to the raw wav file.
@@ -110,7 +121,6 @@ def _validate_one(
         asr_model: Loaded faster-whisper model.
         lang_code: ISO language code for transcription/normalization.
         cfg: Pipeline configuration.
-        asr_lock: Serializes access to the shared ASR model.
 
     Returns:
         Result dict with keys: accept, idx, file, wav_path, expected,
@@ -123,8 +133,7 @@ def _validate_one(
         "expected": expected,
     }
     try:
-        with asr_lock:
-            transcription = _transcribe(asr_model, wav_path, lang_code)
+        transcription = _transcribe(asr_model, wav_path, lang_code)
     except Exception as e:
         logger.warning("ASR failed for %s: %s", wav_path.name, e)
         return {
@@ -220,8 +229,10 @@ def run_validate(cfg: common.Config) -> dict[str, Any]:
     Transcribes each raw wav with faster-whisper, computes WER against the
     expected text, and moves clips to accepted_wav/ or rejected/ based on the
     configured wer_threshold. When ``cfg.asr_workers > 1`` the transcription
-    runs in a thread pool (faster-whisper releases the GIL during inference),
-    with a lock serializing access to the shared model.
+    runs in a thread pool with true parallelism: faster-whisper (CTranslate2)
+    supports concurrent ``transcribe()`` calls via its ``num_workers`` setting,
+    batching requests on the GPU or using multiple CPU cores. Memory usage grows
+    with the number of workers.
 
     Args:
         cfg: Pipeline configuration.
@@ -260,24 +271,22 @@ def run_validate(cfg: common.Config) -> dict[str, Any]:
     rejected = 0
     wer_values: list[float] = []
     rejected_records: list[dict[str, Any]] = []
-    asr_lock = threading.Lock()
     progress = tqdm(total=len(work), desc="validate", unit="wav")
 
     if cfg.asr_workers <= 1:
         # Sequential path: simple and predictable.
         for wav_path, idx, expected in work:
-            res = _validate_one(
-                wav_path, idx, expected, asr_model, lang_code, cfg, asr_lock
-            )
+            res = _validate_one(wav_path, idx, expected, asr_model, lang_code, cfg)
             if _handle_result(res, cfg, wer_values, rejected_records) == "accepted":
                 accepted += 1
             else:
                 rejected += 1
             progress.update(1)
     else:
-        # Parallel path: faster-whisper releases the GIL during inference, so a
-        # small thread pool gives real overlap. The shared model is guarded by
-        # asr_lock; WER + file moves run on the main thread as results arrive.
+        # Parallel path: faster-whisper (CTranslate2) supports concurrent
+        # transcribe() calls via num_workers, so the thread pool gives real
+        # throughput on GPU (batched requests) and on CPU (multiple cores).
+        # Results are collected as they complete (order is not index-sorted).
         with ThreadPoolExecutor(max_workers=cfg.asr_workers) as pool:
             futures = [
                 pool.submit(
@@ -288,7 +297,6 @@ def run_validate(cfg: common.Config) -> dict[str, Any]:
                     asr_model,
                     lang_code,
                     cfg,
-                    asr_lock,
                 )
                 for wav_path, idx, expected in work
             ]
