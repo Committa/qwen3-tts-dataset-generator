@@ -29,7 +29,7 @@ asr_model: "medium"
 asr_device: "cuda"
 asr_compute_type: "float16"
 asr_workers: 1                # parallel ASR transcriptions (1=sequential; >1=thread pool, faster-whisper runs them concurrently via num_workers; memory grows with workers)
-wer_threshold: 0.20
+wer_threshold: 0.15
 
 target_sample_rate: 22050
 target_lufs: -23.0
