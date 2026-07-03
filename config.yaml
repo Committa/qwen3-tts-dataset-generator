@@ -1,31 +1,35 @@
+## Model ----------------------------------------------------------------------
+
 model_size: "1.7b"
 model_type: "custom_voice"   # "custom_voice" (Qwen preset speakers) | "base" (voice clone from inputs/voices/)
 dtype: "bfloat16"
 device_map: "cuda:0"
 attn_implementation: "sdpa"
 
-# --- voice identity (both modes) --------------------------------------
+## Voice ----------------------------------------------------------------------
 # Speaker is the voice identity for BOTH modes:
 # - custom_voice: name of a built-in Qwen preset speaker (e.g. "Vivian").
 # - base:         name of a custom voice under inputs/voices/<speaker>.wav
 #                 (and <speaker>.txt for ICL mode, see x_vector_only_mode below).
+
 speaker: "Vivian"
 language: "Auto"
+
 # custom_voice 1.7B only: style instruction in natural language (ignored by 0.6B model).
 # Example: "Speak in a calm, neutral, declarative tone with falling intonation at sentence endings."
 instruct: "Speak in a calm, neutral, declarative tone with falling intonation at the end of statements. Avoid rising pitch at sentence endings. Speak at a steady pace."
 
-# --- base mode only (ignored in custom_voice) -------------------------
+# Base mode only (ignored in custom_voice):
 x_vector_only_mode: false    # false=ICL (best quality, needs inputs/voices/<speaker>.txt)
                              # true = x-vector-only (no transcript needed, lower quality)
 
-# --- corpus inputs (under inputs/) ------------------------------------
-input_sentences: "sentences.txt"        # TTS corpus, one sentence per line
-test_sentences: "test_sentences.txt"    # phrases for `test-gen-dataset`
+## Generation ----------------------------------------------------------------
 
 batch_size: 2
 seed: 42
 max_new_tokens: 2048
+
+## Validation ----------------------------------------------------------------
 
 asr_model: "medium"
 asr_device: "cuda"
@@ -33,10 +37,17 @@ asr_compute_type: "float16"
 asr_workers: 1                # parallel ASR transcriptions (1=sequential; >1=thread pool, faster-whisper runs them concurrently via num_workers; memory grows with workers)
 wer_threshold: 0.15
 
+## Normalization ------------------------------------------------------------
+
 target_sample_rate: 22050
 target_lufs: -23.0
-trim_silence_db: 40
+trim_silence_db: 60
+tail_margin_ms: 120    # ms of original signal kept past the trim end (protects final consonants)
+tail_pad_ms: 80        # ms of silence appended at the end after trimming
 
+## Dataset -------------------------------------------------------------------
+
+input_sentences: "sentences.txt"        # TTS corpus, one sentence per line
+test_sentences: "test_sentences.txt"    # phrases for `test-gen-dataset`
 val_ratio: 0.1
-
 clean_on_full_run: true

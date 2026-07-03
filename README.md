@@ -182,7 +182,9 @@ Main parameters:
 | `wer_threshold` | `0.20` | WER rejection threshold (clips above this are rejected) |
 | `target_sample_rate` | `22050` | output sample rate in Hz |
 | `target_lufs` | `-23.0` | loudness normalization target (EBU R128) |
-| `trim_silence_db` | `40` | dB threshold for silence trimming |
+| `trim_silence_db` | `60` | dB threshold for silence trimming (higher = less aggressive) |
+| `tail_margin_ms` | `120` | ms of original signal preserved past the trim end (protects final consonants) |
+| `tail_pad_ms` | `80` | ms of silence appended after trimming (clean decay boundary) |
 | `val_ratio` | `0.1` | fraction of data held out for validation |
 | `clean_on_full_run` | `true` | auto-clean workspace before a fresh full run (`--no-clean` overrides) |
 

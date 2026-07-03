@@ -156,7 +156,9 @@ class Config:
     wer_threshold: float = 0.15
     target_sample_rate: int = 22050
     target_lufs: float = -23.0
-    trim_silence_db: float = 40.0
+    trim_silence_db: float = 60.0
+    tail_margin_ms: float = 120.0
+    tail_pad_ms: float = 80.0
     val_ratio: float = 0.1
     clean_on_full_run: bool = True
     paths: Paths = field(default_factory=Paths)
@@ -216,6 +218,8 @@ def load_config(config_path: str | Path | None = None) -> Config:
     cfg.target_sample_rate = int(raw.get("target_sample_rate", cfg.target_sample_rate))
     cfg.target_lufs = float(raw.get("target_lufs", cfg.target_lufs))
     cfg.trim_silence_db = float(raw.get("trim_silence_db", cfg.trim_silence_db))
+    cfg.tail_margin_ms = float(raw.get("tail_margin_ms", cfg.tail_margin_ms))
+    cfg.tail_pad_ms = float(raw.get("tail_pad_ms", cfg.tail_pad_ms))
     cfg.val_ratio = float(raw.get("val_ratio", cfg.val_ratio))
     cfg.clean_on_full_run = bool(raw.get("clean_on_full_run", cfg.clean_on_full_run))
 

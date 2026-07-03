@@ -35,12 +35,28 @@ def _to_mono(data: np.ndarray) -> np.ndarray:
     return data
 
 
-def _trim_silence(data: np.ndarray, sr: int, top_db: float) -> np.ndarray:
+def _trim_silence(
+    data: np.ndarray,
+    sr: int,
+    top_db: float,
+    tail_margin_ms: float = 120.0,
+    tail_pad_ms: float = 80.0,
+) -> np.ndarray:
     try:
         import librosa
 
-        trimmed, _ = librosa.effects.trim(data.astype(np.float32), top_db=top_db)
-        return trimmed
+        y = data.astype(np.float32)
+        _trimmed, interval = librosa.effects.trim(y, top_db=top_db)
+        start = int(interval[0])
+        end = int(interval[1])
+        margin = int(sr * tail_margin_ms / 1000.0)
+        if margin > 0:
+            end = min(len(y), end + margin)
+        out = y[start:end]
+        pad = int(sr * tail_pad_ms / 1000.0)
+        if pad > 0:
+            out = np.concatenate((out, np.zeros(pad, dtype=out.dtype)))
+        return out
     except Exception:
         return data
 
@@ -69,7 +85,9 @@ def _process_file(src: Path, cfg: common.Config) -> tuple[bool, str]:
 
     data = _to_mono(data)
     data, sr = _resample(data, sr, cfg.target_sample_rate)
-    data = _trim_silence(data, sr, cfg.trim_silence_db)
+    data = _trim_silence(
+        data, sr, cfg.trim_silence_db, cfg.tail_margin_ms, cfg.tail_pad_ms
+    )
     data = _loudness_normalize(data, sr, cfg.target_lufs)
     data = np.clip(data, -1.0, 1.0)
     peak = float(np.max(np.abs(data))) if data.size else 0.0
@@ -86,7 +104,8 @@ def run_normalize(cfg: common.Config) -> dict[str, Any]:
     Operations:
         - Convert to mono
         - Resample to target sample rate
-        - Trim leading/trailing silence
+        - Trim leading/trailing silence (preserving ``tail_margin_ms`` of tail,
+          then appending ``tail_pad_ms`` of silence for clean decay boundaries)
         - Loudness normalize to target LUFS
         - Peak normalize to 0.99
         - Save as 16-bit PCM WAV
