@@ -17,7 +17,7 @@ language: "Italian"    # explicit language required ("Auto" disables WER normali
 
 # custom_voice 1.7B only: style instruction in natural language (ignored by 0.6B model).
 # Example: "Speak in a calm, neutral, declarative tone with falling intonation at sentence endings."
-instruct: "Speak in a calm, neutral, declarative tone with falling intonation at the end of statements. Avoid rising pitch at sentence endings. Speak at a steady pace."
+instruct: "Read aloud in a clear, neutral narration tone with consistent pace and tone across sentences. Use falling intonation at the end of statements. Articulate each word cleanly. Begin each sentence gently, without abrupt emphasis."
 
 # Base mode only (ignored in custom_voice):
 x_vector_only_mode: false    # false=ICL (best quality, needs inputs/voices/<speaker>.txt)
