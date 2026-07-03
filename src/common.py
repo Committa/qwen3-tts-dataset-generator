@@ -283,7 +283,7 @@ class Config:
     to the default values defined here.
     """
 
-    model_size: str = "0.6b"
+    model_size: str = "1.7b"
     model_type: str = "custom_voice"
     dtype: str = "bfloat16"
     device_map: str = "cuda:0"

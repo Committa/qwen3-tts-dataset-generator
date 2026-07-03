@@ -16,7 +16,6 @@ speaker: "Vivian"
 language: "Italian"    # explicit language required ("Auto" disables WER normalisation)
 
 # custom_voice 1.7B only: style instruction in natural language (ignored by 0.6B model).
-# Example: "Speak in a calm, neutral, declarative tone with falling intonation at sentence endings."
 instruct: "Read aloud in a clear, neutral narration tone with consistent pace and tone across sentences. Use falling intonation at the end of statements. Articulate each word cleanly. Begin each sentence gently, without abrupt emphasis."
 
 # Base mode only (ignored in custom_voice):
