@@ -45,6 +45,15 @@ poetry run ruff check src            # lint
 - `test_speaker.py` sweeps the universe of the configured `model_type` (preset speakers for `custom_voice`, all voices under `inputs/voices/` for `base`); `--speaker NAME` restricts to one. Both worlds cannot be tested in a single run (different model).
 - Downstream steps (`validate`, `normalize`, `manifest`, `report`) are model-type-agnostic: the model always returns `(wavs, sr)`. Only `generate` and `report` (model section) branch on `model_type`.
 
+## Sampling parameters
+
+- Configurable in `config.yaml` under the Generation section: `do_sample`, `temperature`, `top_k`, `top_p`, `repetition_penalty` (plus `max_new_tokens`). Loaded into `Config` by `common.load_config` and forwarded to the model by `generate._sampling_kwargs` (used by both `run_generate` and `test_speaker` via `generate_phrases`).
+- The Qwen3-TTS checkpoint ships a `generation_config.json` with the author-recommended defaults: `do_sample=true, temperature=0.9, top_p=1.0, top_k=50, repetition_penalty=1.05, max_new_tokens=8192`. These are the values the authors used in evaluation.
+- `temperature` is the main lever for cross-clip consistency. Lower => less variance in tone/pauses/intonation across clips. The model is tuned at 0.9; going well below ~0.6 takes it out of distribution and can trigger **EOS-collapse** (the model emits the end-of-speech token prematurely => clip truncated to a few words + silence).
+- `top_p` must stay at `1.0` when `temperature` is low: at low temperature the distribution is already peaked, so `top_p < 1.0` cuts the tail of continuation tokens and can make EOS-collapse *more* likely (the nucleus collapses on the EOS token alone), with no consistency gain.
+- Truncated clips have high WER and are rejected by the `validate` step. Recover them with `poetry run gen-dataset --step generate --only-rejected` (re-runs only the rejected subset with a fresh RNG draw, same temperature). Iterate `validate` -> `--only-rejected` until clean.
+- `min_new_tokens` is NOT configurable: it is hardcoded to `2` inside `Qwen3TTSForConditionalGeneration.generate` (`modeling_qwen3_tts.py`, `talker_kwargs`), so passing it via kwargs is silently ignored.
+
 ## Resumability
 
 - `workspace/.generate_checkpoint.json` tracks processed sentence indices. Re-running `--step generate` skips already-done clips.

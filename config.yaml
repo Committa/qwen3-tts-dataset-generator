@@ -12,7 +12,7 @@ attn_implementation: "sdpa"
 # - base:         name of a custom voice under inputs/voices/<speaker>.wav
 #                 (and <speaker>.txt for ICL mode, see x_vector_only_mode below).
 
-speaker: "Vivian"
+speaker: "Sohee"
 language: "Italian"    # explicit language required ("Auto" disables WER normalisation)
 
 # custom_voice 1.7B only: style instruction in natural language (ignored by 0.6B model).
@@ -28,12 +28,40 @@ batch_size: 3
 seed: 42
 max_new_tokens: 512
 
+# Sampling parameters forwarded to the Qwen3-TTS model.
+#
+# temperature is the main lever for cross-clip consistency: lower => the
+# distribution is more peaked => less variance in tone/pauses/intonation
+# across clips. The model is tuned at 0.9 (see the checkpoint's
+# generation_config.json); going well below ~0.6 takes it out of distribution
+# and can trigger EOS-collapse: the model emits the end-of-speech token
+# prematurely and the clip is truncated to a few words + silence.
+# Truncated clips have high WER and are rejected by the `validate` step;
+# regenerate them with: poetry run gen-dataset --step generate --only-rejected
+#
+# top_p: kept at 1.0 (author default). At low temperature, top_p < 1.0 cuts
+# the tail of continuation tokens and can INCREASE EOS-collapse truncation
+# (the nucleus collapses on the EOS token alone). 1.0 keeps the escape hatch
+# open with negligible variance impact at temp=0.3.
+#
+# do_sample: false switches to greedy decoding (fully deterministic, but may
+# produce artifacts/loops on codec TTS models — prefer low temperature with
+# do_sample: true).
+#
+# Values below prioritize maximum homogeneity (consistency) over avoiding
+# truncation; failed clips are recovered via validate -> --only-rejected.
+do_sample: true
+temperature: 0.3              # main consistency lever; 0.9 = author default (varied)
+top_k: 50                     # candidate-token truncation; 50 = author default
+top_p: 1.0                    # keep 1.0 at low temp (see comment above)
+repetition_penalty: 1.05      # >1 discourages token loops; 1.05 = author default
+
 ## Validation ----------------------------------------------------------------
 
 asr_model: "medium"
 asr_device: "cuda"
 asr_compute_type: "float16"
-asr_workers: 1                # parallel ASR transcriptions (1=sequential; >1=thread pool, faster-whisper runs them concurrently via num_workers; memory grows with workers)
+asr_workers: 2                # parallel ASR transcriptions (1=sequential; >1=thread pool, faster-whisper runs them concurrently via num_workers; memory grows with workers)
 wer_threshold: 0.15
 
 ## Normalization ------------------------------------------------------------
@@ -46,7 +74,7 @@ tail_pad_ms: 80        # ms of silence appended at the end after trimming
 
 ## Dataset -------------------------------------------------------------------
 
-input_sentences: "sentences.txt"        # TTS corpus, one sentence per line
+input_sentences: "italian_piper_corpus.txt"        # TTS corpus, one sentence per line
 test_sentences: "test_sentences.txt"    # phrases for `test-gen-dataset`
 val_ratio: 0.1
 clean_on_full_run: true

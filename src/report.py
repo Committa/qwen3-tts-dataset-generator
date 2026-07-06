@@ -94,6 +94,14 @@ def run_report(
             "language": cfg.language,
             "instruct": cfg.instruct,
             "dtype": cfg.dtype,
+            "sampling": {
+                "do_sample": cfg.do_sample,
+                "temperature": cfg.temperature,
+                "top_k": cfg.top_k,
+                "top_p": cfg.top_p,
+                "repetition_penalty": cfg.repetition_penalty,
+                "max_new_tokens": cfg.max_new_tokens,
+            },
         },
     }
 

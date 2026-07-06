@@ -187,6 +187,30 @@ def get_voice_clone_prompt(model, cfg: common.Config, use_cache: bool = True) ->
     return [items[0]]
 
 
+def _sampling_kwargs(cfg: common.Config) -> dict:
+    """Build the sampling-generation kwargs forwarded to the Qwen3-TTS model.
+
+    Centralises the sampling parameters so both generate_custom_voice and
+    generate_voice_clone call sites stay in sync. Lower temperature / top_p /
+    top_k reduce variance across clips (see config.yaml comments).
+
+    Args:
+        cfg: Pipeline configuration.
+
+    Returns:
+        Dict of generation kwargs (max_new_tokens, do_sample, temperature,
+        top_k, top_p, repetition_penalty) to unpack into the model call.
+    """
+    return dict(
+        max_new_tokens=cfg.max_new_tokens,
+        do_sample=cfg.do_sample,
+        temperature=cfg.temperature,
+        top_k=cfg.top_k,
+        top_p=cfg.top_p,
+        repetition_penalty=cfg.repetition_penalty,
+    )
+
+
 def _generate_batch(
     model,
     texts: list[str],
@@ -199,6 +223,9 @@ def _generate_batch(
     In custom_voice mode uses generate_custom_voice with the configured speaker
     (overridable via speaker_override); in base mode uses generate_voice_clone
     with a precomputed voice prompt. Expects exactly len(texts) outputs back.
+    The sampling parameters (do_sample, temperature, top_k, top_p,
+    repetition_penalty) from cfg are forwarded to the model to control variance
+    across clips.
 
     Args:
         model: Loaded Qwen3TTSModel.
@@ -213,12 +240,13 @@ def _generate_batch(
         List of (wav, sample_rate) tuples, one per input text.
     """
     n = len(texts)
+    sampling = _sampling_kwargs(cfg)
     if cfg.model_type == "base":
         out, sr = model.generate_voice_clone(
             text=texts,
             language=[cfg.language] * n,
             voice_clone_prompt=voice_clone_prompt,
-            max_new_tokens=cfg.max_new_tokens,
+            **sampling,
         )
     else:
         speaker = speaker_override if speaker_override is not None else cfg.speaker
@@ -227,7 +255,7 @@ def _generate_batch(
             language=[cfg.language] * n,
             speaker=[speaker] * n,
             instruct=[cfg.instruct] * n if cfg.instruct else None,
-            max_new_tokens=cfg.max_new_tokens,
+            **sampling,
         )
     return [(w, sr) for w in out]
 

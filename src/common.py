@@ -295,6 +295,19 @@ class Config:
     batch_size: int = 4
     seed: int = 42
     max_new_tokens: int = 2048
+    # Sampling parameters forwarded to the Qwen3-TTS model. `temperature` is
+    # the main lever for cross-clip consistency (lower => less variance); the
+    # model is tuned at 0.9 and going well below ~0.6 can trigger EOS-collapse
+    # (premature end-of-speech => truncated clips), recovered via validate ->
+    # `--only-rejected`. `top_p` is kept at 1.0: at low temperature, top_p < 1.0
+    # cuts the continuation tail and increases truncation with no consistency
+    # gain. do_sample=False is greedy (deterministic, but may loop on codec
+    # TTS models); prefer low temperature with do_sample=True.
+    do_sample: bool = True
+    temperature: float = 0.3
+    top_k: int = 50
+    top_p: float = 1.0
+    repetition_penalty: float = 1.05
     asr_model: str = "medium"
     asr_device: str = "cuda"
     asr_compute_type: str = "float16"
@@ -359,6 +372,13 @@ def load_config(config_path: str | Path | None = None) -> Config:
     cfg.batch_size = int(raw.get("batch_size", cfg.batch_size))
     cfg.seed = int(raw.get("seed", cfg.seed))
     cfg.max_new_tokens = int(raw.get("max_new_tokens", cfg.max_new_tokens))
+    cfg.do_sample = bool(raw.get("do_sample", cfg.do_sample))
+    cfg.temperature = float(raw.get("temperature", cfg.temperature))
+    cfg.top_k = int(raw.get("top_k", cfg.top_k))
+    cfg.top_p = float(raw.get("top_p", cfg.top_p))
+    cfg.repetition_penalty = float(
+        raw.get("repetition_penalty", cfg.repetition_penalty)
+    )
     cfg.asr_model = raw.get("asr_model", cfg.asr_model)
     cfg.asr_device = raw.get("asr_device", cfg.asr_device)
     cfg.asr_compute_type = raw.get("asr_compute_type", cfg.asr_compute_type)
