@@ -127,7 +127,7 @@ def run_normalize(cfg: common.Config) -> dict[str, Any]:
     # --- Normalize each accepted clip in-place ---
     ok = 0
     failed = 0
-    progress = tqdm(files, desc="normalize", unit="wav")
+    progress = tqdm(files, desc="normalize", unit="wav", dynamic_ncols=True)
     for wav_path in progress:
         success, msg = _process_file(wav_path, cfg)
         if success:

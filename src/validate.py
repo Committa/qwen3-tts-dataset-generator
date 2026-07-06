@@ -271,7 +271,7 @@ def run_validate(cfg: common.Config) -> dict[str, Any]:
     rejected = 0
     wer_values: list[float] = []
     rejected_records: list[dict[str, Any]] = []
-    progress = tqdm(total=len(work), desc="validate", unit="wav")
+    progress = tqdm(total=len(work), desc="validate", unit="wav", dynamic_ncols=True)
 
     if cfg.asr_workers <= 1:
         # Sequential path: simple and predictable.

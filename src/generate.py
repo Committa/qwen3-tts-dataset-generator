@@ -46,6 +46,9 @@ def load_tts_model(cfg: common.Config):
     except ImportError as e:
         raise RuntimeError("qwen-tts is not installed. Run `poetry install`.") from e
 
+    logging.getLogger("transformers").setLevel(logging.WARNING)
+    logging.getLogger("qwen_tts").setLevel(logging.WARNING)
+
     common.check_cuda_or_die(logger)
     model_id = cfg.model_hub_id
     logger.info(
@@ -373,7 +376,7 @@ def run_generate(cfg: common.Config, only_rejected: bool = False) -> dict[str, A
     skipped = 0
     start_time = time.time()
     batch = cfg.batch_size
-    progress = tqdm(pending_idx, desc="generate", unit="sent")
+    progress = tqdm(pending_idx, desc="generate", unit="sent", dynamic_ncols=True)
 
     for start in range(0, len(pending_idx), batch):
         batch_idxs = pending_idx[start : start + batch]

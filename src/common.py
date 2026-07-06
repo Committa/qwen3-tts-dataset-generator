@@ -412,6 +412,8 @@ def setup_logging(log_file: Path, level: int = logging.INFO) -> logging.Logger:
     sh.setFormatter(fmt)
     parent.addHandler(fh)
     parent.addHandler(sh)
+    for noisy in ("transformers", "qwen_tts"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     return parent
 
 
