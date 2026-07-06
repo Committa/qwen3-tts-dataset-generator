@@ -16,7 +16,10 @@ speaker: "Sohee"
 language: "Italian"    # explicit language required ("Auto" disables WER normalisation)
 
 # custom_voice 1.7B only: style instruction in natural language (ignored by 0.6B model).
-instruct: "Read aloud in a clear, neutral narration tone with consistent pace and tone across sentences. Use falling intonation at the end of statements. Articulate each word cleanly. Begin each sentence gently, without abrupt emphasis."
+# Keep it SHORT and SINGLE-style (one emotion/tone cue): the model is trained on
+# brief directives like "Very happy." or "calm, neutral tone", not on stacked
+# prosodic rules. Cross-clip consistency comes from `temperature`, not the instruct.
+instruct: "Read in a calm, neutral tone."
 
 # Base mode only (ignored in custom_voice):
 x_vector_only_mode: false    # false=ICL (best quality, needs inputs/voices/<speaker>.txt)
