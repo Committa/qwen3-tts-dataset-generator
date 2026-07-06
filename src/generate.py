@@ -46,9 +46,6 @@ def load_tts_model(cfg: common.Config):
     except ImportError as e:
         raise RuntimeError("qwen-tts is not installed. Run `poetry install`.") from e
 
-    logging.getLogger("transformers").setLevel(logging.WARNING)
-    logging.getLogger("qwen_tts").setLevel(logging.WARNING)
-
     common.check_cuda_or_die(logger)
     model_id = cfg.model_hub_id
     logger.info(

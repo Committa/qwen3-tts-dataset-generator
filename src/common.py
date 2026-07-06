@@ -384,6 +384,22 @@ def load_config(config_path: str | Path | None = None) -> Config:
     return cfg
 
 
+class _SuppressPadTokenWarning(logging.Filter):
+    """Drop the per-batch ``Setting pad_token_id to eos_token_id`` warning.
+
+    ``transformers.generation.utils`` emits this ``WARNING`` on every
+    ``generate()`` call when the model's ``generation_config`` has no
+    ``pad_token_id`` (qwen3-tts leaves it unset and defaults to the eos
+    token). It is constant noise repeated once per batch and garbles the
+    tqdm progress bar on stderr. A level-based fix cannot drop a WARNING
+    without also hiding legitimate warnings, so a message filter is the
+    surgical fix. Real warnings/errors are unaffected.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "Setting `pad_token_id` to `eos_token_id`" not in record.getMessage()
+
+
 def setup_logging(log_file: Path, level: int = logging.INFO) -> logging.Logger:
     """Configure dual-output logging (file + stdout) for the whole package.
 
@@ -414,6 +430,9 @@ def setup_logging(log_file: Path, level: int = logging.INFO) -> logging.Logger:
     parent.addHandler(sh)
     for noisy in ("transformers", "qwen_tts"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    logging.getLogger("transformers.generation.utils").addFilter(
+        _SuppressPadTokenWarning()
+    )
     return parent
 
 
