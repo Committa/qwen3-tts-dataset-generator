@@ -5,6 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+
+os.environ.setdefault(
+    "PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True"
+)
+
 import re
 import sys
 from dataclasses import dataclass, field
