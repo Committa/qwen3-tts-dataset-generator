@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 
 import click
 
@@ -17,6 +18,75 @@ logger = logging.getLogger(__name__)
 
 STEPS = ["generate", "validate", "normalize", "publish", "all"]
 STEPS_ORDER = ["generate", "validate", "normalize", "publish"]
+
+
+def _maybe_clean_workspace(cfg: common.Config, do_clean: bool, no_clean: bool) -> None:
+    """Run the auto-clean logic for a full pipeline run, with resume detection.
+
+    When a full run would normally auto-clean the workspace, check for an
+    incomplete generation checkpoint. If one exists (some sentences done and
+    some still pending), prompt the user to choose between resuming the
+    previous run (skip clean) or starting a fresh clean run. In
+    non-interactive contexts (no TTY on stdin) the default is to resume, so
+    progress is never lost silently. When no checkpoint exists or the
+    previous generation is complete, the workspace is cleaned as usual.
+
+    Args:
+        cfg: Pipeline configuration.
+        do_clean: True when the selected step combination requests a clean
+            (i.e. a full run without ``--step``/``--from``).
+        no_clean: True when the user passed ``--no-clean``; clean is skipped
+            entirely regardless of resume detection.
+    """
+    if not do_clean or not cfg.clean_on_full_run or no_clean:
+        return
+
+    done = common.read_checkpoint(cfg.paths.checkpoint)
+    try:
+        total = len(common.load_sentences(cfg))
+    except FileNotFoundError:
+        total = 0
+
+    if not (0 < len(done) < total):
+        logger.info("Auto-clean: clearing workspace for a fresh run.")
+        common.clean_working_dirs(cfg)
+        return
+
+    pending = total - len(done)
+    interactive = bool(sys.stdin) and sys.stdin.isatty()
+    if interactive:
+        choice = click.prompt(
+            f"An incomplete generation was found "
+            f"({len(done)}/{total} done, {pending} pending).\n"
+            "  [r] resume previous generation (skip clean)\n"
+            "  [f] start a fresh clean run\n"
+            "Choose",
+            type=click.Choice(["r", "f"], case_sensitive=False),
+            default="r",
+            show_default=False,
+        )
+        resume = choice == "r"
+    else:
+        logger.info(
+            "Non-interactive run with an incomplete checkpoint "
+            "(%d/%d done, %d pending): resuming to preserve progress "
+            "(delete the checkpoint file or use --no-clean to change).",
+            len(done),
+            total,
+            pending,
+        )
+        resume = True
+
+    if resume:
+        logger.info(
+            "Resuming previous generation: %d/%d done, %d pending.",
+            len(done),
+            total,
+            pending,
+        )
+    else:
+        logger.info("Starting a fresh run: clearing workspace.")
+        common.clean_working_dirs(cfg)
 
 
 @click.command()
@@ -127,10 +197,8 @@ def main(
     )
     common.setup_logging(cfg.paths.log_file)
 
-    # Auto-clean workspace on full run
-    if do_clean and cfg.clean_on_full_run and not no_clean:
-        logger.info("Auto-clean: clearing workspace for a fresh run.")
-        common.clean_working_dirs(cfg)
+    # Auto-clean workspace on full run (with resume detection)
+    _maybe_clean_workspace(cfg, do_clean, no_clean)
 
     logger.info(
         "Starting pipeline steps=%s model_size=%s",

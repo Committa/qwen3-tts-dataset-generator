@@ -99,6 +99,11 @@ sentences for testing. Works with any language supported by Qwen3-TTS.
 # Full pipeline (auto-clean + all steps + archive)
 poetry run gen-dataset
 
+# If an interrupted generation is detected you will be asked:
+#   [r] resume previous generation (skip clean)
+#   [f] start a fresh clean run
+# Non-interactive runs (no TTY) resume by default to preserve progress.
+
 # Full pipeline without auto-clean
 poetry run gen-dataset --no-clean
 
@@ -194,7 +199,7 @@ Main parameters:
 | `tail_margin_ms` | `120` | ms of original signal preserved past the trim end (protects final consonants) |
 | `tail_pad_ms` | `80` | ms of silence appended after trimming (clean decay boundary) |
 | `val_ratio` | `0.1` | fraction of data held out for validation |
-| `clean_on_full_run` | `true` | auto-clean workspace before a fresh full run (`--no-clean` overrides) |
+| `clean_on_full_run` | `true` | auto-clean workspace before a fresh full run; an incomplete checkpoint prompts resume vs. clean (`--no-clean` overrides) |
 
 ### Speakers (CustomVoice)
 
@@ -261,7 +266,9 @@ poetry run test-gen-dataset --speaker my_voice   # test a single voice
   If too tight, try `device_map: "auto"` (CPU offload, slower) or fall back to
   `model_size: "0.6b"`.
 - On OOM: the pipeline saves the checkpoint and prints a clear suggestion.
-- Full run auto-archives the result in `output/gen{NNN}/`. Use `--no-clean` to skip workspace cleanup.
+- Full run auto-archives the result in `output/gen{NNN}/`. On a full run, if an
+  incomplete generation is detected, you're prompted to resume or start fresh;
+  use `--no-clean` to force a resume, or delete the checkpoint to force a clean.
 
 ## Project structure
 

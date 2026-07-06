@@ -48,7 +48,7 @@ poetry run ruff check src            # lint
 ## Resumability
 
 - `workspace/.generate_checkpoint.json` tracks processed sentence indices. Re-running `--step generate` skips already-done clips.
-- Full pipeline run (`gen-dataset` without `--no-clean` or `--step`) auto-cleans workspace/ and archives the result in `output/gen{NNN}/`.
+- Full pipeline run (`gen-dataset` without `--no-clean` or `--step`) auto-cleans workspace/ and archives the result in `output/gen{NNN}/`. **Resume detection:** if a checkpoint with an incomplete generation is found, `pipeline._maybe_clean_workspace` prompts the user (interactive) to choose resume vs. fresh clean; in non-interactive runs it resumes by default to avoid losing progress. `--no-clean` forces resume; deleting the checkpoint forces a fresh clean.
 - Delete `workspace/.generate_checkpoint.json` (and `workspace/raw_wav/`) to restart generation from scratch.
 
 ## OOM / error behavior
