@@ -402,7 +402,12 @@ def run_generate(cfg: common.Config, only_rejected: bool = False) -> dict[str, A
     start_time = time.time()
     batch = cfg.batch_size
     progress = tqdm(
-        pending_idx, desc="generate", unit="sent", dynamic_ncols=True, initial=len(done)
+        pending_idx,
+        desc="generate",
+        unit="sent",
+        dynamic_ncols=True,
+        total=total,
+        initial=len(done),
     )
 
     for start in range(0, len(pending_idx), batch):
