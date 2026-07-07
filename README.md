@@ -168,6 +168,11 @@ reloaded when switching). Generation is **batched** by `batch_size` from
 `ceil(N / batch_size)` model calls instead of N, dramatically reducing the time
 needed to evaluate the whole universe of voices.
 
+Each generated clip is written next to its exact transcript
+(`output/test_speaker/<speaker>_<i>.wav` + `<speaker>_<i>.txt`), so a good
+candidate can be copied straight into `inputs/voices/` as a voice-cloning
+reference — see [Stable voice for dataset training](#stable-voice-for-dataset-training-recommended).
+
 ## Config (`config.yaml`)
 
 Main parameters:
@@ -259,6 +264,101 @@ Test every custom voice before the full run:
 poetry run test-gen-dataset
 poetry run test-gen-dataset --speaker my_voice   # test a single voice
 ```
+
+## Stable voice for dataset training (recommended)
+
+Generating thousands of clips with a `custom_voice` preset speaker (e.g.
+`Serena`) produces audible **drift**: tone, pacing and micro-formants shift
+across clips, so the dataset sounds like several people with similar voices
+rather than one. This is intrinsic to `custom_voice` — each call resamples the
+speaker from a learned distribution (autoregressive generation over discrete
+codec tokens), so variance accumulates over thousands of draws. For
+downstream training (e.g. Piper) this degrades quality and introduces
+artifacts.
+
+The fix recommended by the Qwen3-TTS team for a stable character voice over
+many lines is to **clone a single fixed reference clip** instead of recalling
+the preset every time:
+
+1. Generate a clean 10-15 s reference clip once with the preset speaker.
+2. Build a reusable `voice_clone_prompt` from it (ICL: reference audio +
+   transcript).
+3. Use that fixed prompt with the **Base** model to synthesize the whole
+   corpus via `generate_voice_clone`.
+
+The identity is then anchored to a concrete audio sample rather than a
+re-sampled distribution, so every clip shares the same timbre and prosody.
+
+### Step-by-step
+
+The `inputs/test_sentences.txt` phrases are calibrated to produce 10-15 s
+clips at Italian speech rate (~3 words/s) — the sweet spot for a
+voice-cloning reference.
+
+1. **Generate reference candidates** with the preset speaker:
+
+   ```bash
+   poetry run test-gen-dataset --model-type custom_voice --speaker Serena
+   ```
+
+   `instruct` from `config.yaml` is applied and **baked into** the resulting
+   audio — the style lives in the reference clip itself, not in a per-call
+   directive. The Base model ignores `instruct` (it has no such input), so
+   this is your only chance to set the tone.
+
+   Each clip is written next to its exact transcript:
+   `output/test_speaker/Serena_00.wav` + `Serena_00.txt`,
+   `Serena_01.wav` + `Serena_01.txt`, etc.
+
+2. **Listen** to the candidates and pick the cleanest one (no truncation,
+   natural pacing, no artifacts). 10-15 s is ideal: shorter captures too
+   little of the speaker; longer bloats the ICL context with no gain.
+
+3. **Copy** the chosen clip and its transcript into `inputs/voices/` under a
+   new voice name, e.g. `serena`:
+
+   ```bash
+   cp output/test_speaker/Serena_03.wav inputs/voices/serena.wav
+   cp output/test_speaker/Serena_03.txt inputs/voices/serena.txt
+   ```
+
+   The `.txt` must match the audio **exactly** (it is the ICL reference
+   transcript). The file written in step 1 is already exact — do not retype
+   it.
+
+4. **Switch the config** to Base + ICL mode:
+
+   ```yaml
+   model_type: "base"
+   speaker: "serena"            # inputs/voices/serena.wav + serena.txt
+   x_vector_only_mode: false    # ICL (best quality, needs the .txt)
+   ```
+
+5. **Generate the dataset**:
+
+   ```bash
+   poetry run gen-dataset
+   ```
+
+   The first run extracts the `VoiceClonePromptItem` once (cached at
+   `workspace/.voice_cache/serena_<model_size>.pt`, auto-invalidated by a
+   fingerprint of the reference audio, transcript, cloning mode and model)
+   and broadcasts it over every batch. Every clip is now conditioned on the
+   same fixed reference → no drift.
+
+### Notes
+
+- Keep `temperature` low (e.g. `0.3`) for cross-clip consistency; see the
+  sampling parameters comment in `config.yaml`. Low temperature is safe here
+  because the reference, not the sampling distribution, carries the identity.
+- `instruct` is ignored in Base mode — set the desired tone in step 1, it is
+  permanent in the reference.
+- To regenerate the reference: pick a different candidate, replace the two
+  files in `inputs/voices/`, and the cache auto-invalidates. To force a clean
+  extraction, delete `workspace/.voice_cache/<name>_<model_size>.pt`.
+- The `test_sentences.txt` clips also serve as a quick speaker evaluation —
+  just note they are optimized for reference length and neutral tone, not for
+  phonetic stress-testing.
 
 ## VRAM / OOM
 

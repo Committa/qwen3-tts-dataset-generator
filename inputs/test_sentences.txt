@@ -1,20 +1,20 @@
-# Test phrases — one per line, used by test-gen-dataset to evaluate all speakers.
-# Empty lines and lines starting with '#' are ignored.
+# Reference-grade test phrases for `test-gen-dataset`. One paragraph per line;
+# empty lines and lines starting with '#' are ignored. Each line is a ~35-45
+# word neutral declarative passage that yields a 10-15 second clip at Italian
+# speech rate (~3 words/s) — the sweet spot for a voice-cloning reference
+# (long enough to capture timbre and prosody, short enough to keep ICL context
+# compact). Each generated clip is written next to its exact transcript, so a
+# good candidate can be copied straight into inputs/voices/ as the reference
+# for base-mode generation. See README "Stable voice for dataset training".
 
-# Stress "gn" / "gl" (palatal nasal/lateral)
-Ogni famiglia sogna uno gnocco caldo e un buon bagno rilassante.
-Voglio bene a mio figlio e a mia figlia più di ogni altra cosa.
+Il mattino è arrivato con una luce limpida che filtrava attraverso le tende, riempiendo la stanza di un chiarore caldo e familiare. Fuori, la città cominciava a svegliarsi lentamente, tra il rumore lontano del traffico e le prime voci dei passanti che attraversavano la piazza.
 
-# Stress "z" vs "s", double consonants, apocope
-Lo zucchero è dolce, ma la sabbia tra i sassi non si mangia mai.
-L'anno scorso ho visto un bel po' di gatti sui tetti di Roma.
+La biblioteca era un luogo di silenzio ordinato, dove ogni libro conservava la memoria di chi lo aveva scritto e di chi lo aveva letto prima di noi. Seduta vicino alla grande finestra, sfogliavo le pagine ingiallite ascoltando il ticchettio regolare dell'orologio a muro.
 
-# Technical register
-L'algoritmo di clustering k-means partiziona i dati in n sottoinsiemi non vuoti.
+Il treno attraversava la campagna con un ritmo regolare, e oltre il finestrino si susseguivano colline dolci, vigneti ordinati e piccoli borghi arroccati sulle cime. Ogni tanto un tunnel interrompeva il paesaggio, e per un istante il vagone piombava in un buio silenzioso.
 
-# Literary register
-Il vento sussurrava tra i rami, e lei sorrideva in silenzio sotto la luna.
+In giardino i limoni erano maturi, e il loro profumo si mescolava a quello della terra bagnata dalla pioggia del mattino. Mi sono fermato sul vialetto, le mani in tasca, a guardare le nuvole che si muovevano lente verso est, cariche di una luce bianca.
 
-# Anglicisms (common English loanwords in Italian)
-Ho inviato l'email al manager per confermare il meeting di domani pomeriggio.
-Dopo il weekend ho bisogno di un po' di relax, lontano dallo smartphone e dal computer.
+Il progetto andava avanti con lentezza, ma ogni passo ci avvicinava all'obiettivo che ci eravamo prefissati all'inizio dell'anno. Durante la riunione abbiamo ripassato i punti aperti uno per uno, annotando le decisioni e lasciando da parte tutto ciò che poteva aspettare.
+
+La sera scendeva piano, e le luci dei lampioni si accendevano una dopo l'altra lungo il viale alberato. Camminavo senza fretta, con il cappotto leggero e le mani in tasca, ascoltando i passi sulla ghiaia e il vento che muoveva appena le foglie dei platani.

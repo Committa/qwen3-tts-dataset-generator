@@ -131,11 +131,18 @@ def main(
     logger.info("Test completed. Files in: %s", out_dir_path)
 
 
-def _persist(results, out_dir: Path, prefix: str) -> int:
-    """Write successful clips to out_dir as {prefix}_{i:02d}.wav.
+def _persist(results, phrases: list[str], out_dir: Path, prefix: str) -> int:
+    """Write successful clips to out_dir as {prefix}_{i:02d}.wav plus a matching
+    {prefix}_{i:02d}.txt with the exact transcript.
+
+    The .txt travels with the .wav so a chosen clip can be copied straight into
+    inputs/voices/ as a voice-cloning reference: the transcript is the ICL
+    reference text and must match the audio exactly, so it is written from the
+    same source phrase that was synthesized (not transcribed post-hoc).
 
     Args:
         results: List of (wav, sr) tuples or None, one per phrase.
+        phrases: The phrases synthesized, aligned with results by position.
         out_dir: Output directory (already exists).
         prefix: Speaker or voice name used for the filename stem.
 
@@ -148,8 +155,10 @@ def _persist(results, out_dir: Path, prefix: str) -> int:
             continue
         wav, sr = res
         fname = out_dir / f"{prefix}_{i:02d}.wav"
+        tname = out_dir / f"{prefix}_{i:02d}.txt"
         try:
             sf.write(str(fname), wav, sr)
+            tname.write_text(phrases[i].strip(), encoding="utf-8")
             logger.info("OK %s [%d] -> %s", prefix, i, fname.name)
             written += 1
         except Exception as e:
@@ -196,7 +205,7 @@ def _test_custom_voices(
             speaker_override=speaker,
             on_skip=lambda i, r: logger.warning("Skip %s [%d] %s", speaker, i, r),
         )
-        _persist(results, out_dir, prefix=speaker)
+        _persist(results, phrases, out_dir, prefix=speaker)
 
 
 def _test_base_voices(
@@ -260,7 +269,7 @@ def _test_base_voices(
                     "Skip %s [%d] %s", voice_name, i, r
                 ),
             )
-            _persist(results, out_dir, prefix=voice_name)
+            _persist(results, phrases, out_dir, prefix=voice_name)
     finally:
         cfg.speaker = original_speaker
 
