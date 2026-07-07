@@ -410,6 +410,7 @@ def run_generate(cfg: common.Config, only_rejected: bool = False) -> dict[str, A
         initial=len(done),
     )
 
+    batch_num = 0
     for start in range(0, len(pending_idx), batch):
         batch_idxs = pending_idx[start : start + batch]
         batch_texts = [sentences[i] for i in batch_idxs]
@@ -447,6 +448,9 @@ def run_generate(cfg: common.Config, only_rejected: bool = False) -> dict[str, A
             done.add(idx)
         progress.update(len(batch_idxs))
         common.write_checkpoint(cfg.paths.checkpoint, done)
+        batch_num += 1
+        if batch_num % cfg.mem_cleanup_every_n_batches == 0:
+            common.cleanup_gpu(log=logger)
 
     progress.close()
     elapsed = time.time() - start_time

@@ -12,7 +12,7 @@ attn_implementation: "sdpa"
 # - base:         name of a custom voice under inputs/voices/<speaker>.wav
 #                 (and <speaker>.txt for ICL mode, see x_vector_only_mode below).
 
-speaker: "Sohee"
+speaker: "Serena"
 language: "Italian"    # explicit language required ("Auto" disables WER normalisation)
 
 # custom_voice 1.7B only: style instruction in natural language (ignored by 0.6B model).
@@ -30,6 +30,7 @@ x_vector_only_mode: false    # false=ICL (best quality, needs inputs/voices/<spe
 batch_size: 3
 seed: 42
 max_new_tokens: 512
+mem_cleanup_every_n_batches: 100   # free GPU allocator pool every N batches to prevent VRAM fragmentation
 
 # Sampling parameters forwarded to the Qwen3-TTS model.
 #

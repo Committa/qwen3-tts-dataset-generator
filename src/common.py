@@ -324,6 +324,7 @@ class Config:
     tail_margin_ms: float = 120.0
     tail_pad_ms: float = 80.0
     val_ratio: float = 0.1
+    mem_cleanup_every_n_batches: int = 100
     clean_on_full_run: bool = True
     paths: Paths = field(default_factory=Paths)
 
@@ -395,6 +396,9 @@ def load_config(config_path: str | Path | None = None) -> Config:
     cfg.tail_margin_ms = float(raw.get("tail_margin_ms", cfg.tail_margin_ms))
     cfg.tail_pad_ms = float(raw.get("tail_pad_ms", cfg.tail_pad_ms))
     cfg.val_ratio = float(raw.get("val_ratio", cfg.val_ratio))
+    cfg.mem_cleanup_every_n_batches = int(
+        raw.get("mem_cleanup_every_n_batches", cfg.mem_cleanup_every_n_batches)
+    )
     cfg.clean_on_full_run = bool(raw.get("clean_on_full_run", cfg.clean_on_full_run))
 
     cfg.paths = Paths(
@@ -526,6 +530,30 @@ def exit_on_oom(exc: BaseException, log: logging.Logger) -> None:
     """
     log.error(OOM_HINT)
     raise SystemExit(2) from exc
+
+
+def cleanup_gpu(log: logging.Logger | None = None) -> None:
+    """Run garbage collection and flush the PyTorch CUDA allocator pool.
+
+    This resets GPU memory fragmentation that builds up across hundreds
+    of batches with variable-length outputs. Called periodically from
+    the generation loop; the overhead is negligible (~100-500 ms).
+    """
+    import gc
+
+    import torch
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        if log is not None:
+            reserved = torch.cuda.memory_reserved() / 1024**3
+            allocated = torch.cuda.memory_allocated() / 1024**3
+            log.debug(
+                "GPU cache flushed: allocated=%.2f GiB, reserved=%.2f GiB",
+                allocated,
+                reserved,
+            )
 
 
 def load_sentences(cfg: Config) -> list[str]:
