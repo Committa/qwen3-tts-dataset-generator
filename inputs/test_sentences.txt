@@ -1,10 +1,6 @@
 # Test phrases — one per line, used by test-gen-dataset to evaluate all speakers.
 # Empty lines and lines starting with '#' are ignored.
 
-Buongiorno, benvenuti alla presentazione del nuovo sistema vocale.
-L'intelligenza artificiale sta trasformando il modo in cui interagiamo con la tecnologia.
-Roma è la città eterna, ricca di storia, arte e cultura millenaria.
-
 # Stress "gn" / "gl" (palatal nasal/lateral)
 Ogni famiglia sogna uno gnocco caldo e un buon bagno rilassante.
 Voglio bene a mio figlio e a mia figlia più di ogni altra cosa.
@@ -18,3 +14,7 @@ L'algoritmo di clustering k-means partiziona i dati in n sottoinsiemi non vuoti.
 
 # Literary register
 Il vento sussurrava tra i rami, e lei sorrideva in silenzio sotto la luna.
+
+# Anglicisms (common English loanwords in Italian)
+Ho inviato l'email al manager per confermare il meeting di domani pomeriggio.
+Dopo il weekend ho bisogno di un po' di relax, lontano dallo smartphone e dal computer.
