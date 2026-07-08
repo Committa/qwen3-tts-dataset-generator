@@ -2,10 +2,11 @@
 
 **Pipeline** that transforms a text corpus into a **synthetic TTS dataset**
 validated by ASR. It generates audio with [Qwen3-TTS], filters out low-quality clips via WER,
-normalizes them (resample, loudness, silence trim), and produces a ready-to-use LJSpeech
+checks pronunciation at the phoneme level (PER), normalizes
+(resample, loudness, silence trim), and produces a ready-to-use LJSpeech
 manifest with train/val split.
 
-**Resumable** (JSON checkpoint), **validated** (ASR + WER), **normalized**
+**Resumable** (JSON checkpoint), **validated** (ASR + WER + phoneme-level PER), **normalized**
 (resample 22050 Hz, loudness EBU R128, silence trimming) and produces an **LJSpeech manifest**
 with deterministic train/val split. Works with any language supported by Qwen3-TTS:
 Italian, English, Chinese, Japanese, Korean, German, French, Russian, Portuguese, Spanish.
