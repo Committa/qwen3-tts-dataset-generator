@@ -58,6 +58,14 @@ _PHONEME_STRIP_TABLE = str.maketrans("", "", "\u02c8\u02cc\u02d0\u02d1\u0329")
 # Filename of the JSONL aggregate written under workspace/rejected/.
 _REJECTED_LOG_NAME = "pronunciation.log"
 
+# Filename of the per-word PER CSV report written under workspace/.
+_WORD_REPORT_NAME = ".pronunciation_words.csv"
+
+# Sentinel inserted by espeak-ng between words in the phoneme output so word
+# boundaries survive tokenization. The ASCII unit separator (\x1f) is a control
+# character that never appears in IPA phoneme strings.
+_WORD_SENTINEL = "\x1f"
+
 
 @dataclass
 class _Clip:
@@ -160,30 +168,27 @@ def _percentile(sorted_values: list[float], pct: float) -> float:
     return sorted_values[k]
 
 
-def _phonemize_references(clips: list[_Clip], lang_code: str) -> dict[int, str]:
-    """Convert each clip's reference text to normalized IPA phonemes via espeak-ng.
+def _make_espeak_backend(lang_code: str) -> Any:
+    """Construct the espeak-ng backend used for reference phonemization.
 
-    Uses the ``phonemizer`` espeak backend with ``language_switch='remove-flags'``
-    so that foreign-word flags (e.g. ``(en)``) inserted by espeak-ng are dropped,
-    and ``with_stress=False`` / ``preserve_punctuation=False`` so the output is a
-    clean stream of IPA phones, space-separated for direct PER tokenization.
+    Centralizes backend construction so the espeak-not-found error path and the
+    fixed espeak options (``with_stress=False``, ``preserve_punctuation=False``,
+    ``language_switch='remove-flags'``) live in one place.
 
     Args:
-        clips: Clips whose ``expected`` text must be phonemized.
         lang_code: ISO 639-1 language code (e.g. ``"it"``).
 
     Returns:
-        A ``{idx: normalized_phonemes}`` dict.
+        An ``EspeakBackend`` instance.
 
     Raises:
         RuntimeError: If the espeak-ng binary is not found, with the actionable
             ``ESPEAK_HINT`` appended to the message.
     """
     from phonemizer.backend import EspeakBackend
-    from phonemizer.separator import Separator
 
     try:
-        backend = EspeakBackend(
+        return EspeakBackend(
             language=lang_code,
             with_stress=False,
             preserve_punctuation=False,
@@ -192,10 +197,166 @@ def _phonemize_references(clips: list[_Clip], lang_code: str) -> dict[int, str]:
     except RuntimeError as exc:
         raise RuntimeError(f"{exc}\n\n{ESPEAK_HINT}") from exc
 
-    sep = Separator(phone=" ", syllable="", word=" ")
+
+def _phonemize(clips: list[_Clip], lang_code: str) -> dict[int, list[tuple[str, str]]]:
+    """Convert each clip's reference text to per-word normalized IPA phonemes.
+
+    Uses a sentinel word separator (``_WORD_SENTINEL``) so word boundaries
+    survive tokenization: the output is, per clip, a list of
+    ``(word, normalized_phonemes)`` pairs in sentence order. The flat
+    clip-level phoneme string consumed by :func:`_per` is derived from this
+    same output via :func:`_flat_phonemes`, so espeak-ng is invoked exactly
+    once per run (not once for clip-level and once for per-word).
+
+    Args:
+        clips: Clips whose ``expected`` text must be phonemized.
+        lang_code: ISO 639-1 language code (e.g. ``"it"``).
+
+    Returns:
+        A ``{idx: [(word, phonemes), ...]}`` dict.
+    """
+    from phonemizer.separator import Separator
+
+    backend = _make_espeak_backend(lang_code)
+    sep = Separator(phone=" ", syllable="", word=_WORD_SENTINEL)
     sentences = [c.expected for c in clips]
     raw = backend.phonemize(sentences, separator=sep, strip=True)
-    return {c.idx: _normalize_phonemes(r or "") for c, r in zip(clips, raw)}
+
+    out: dict[int, list[tuple[str, str]]] = {}
+    for clip, phonemized in zip(clips, raw):
+        words = clip.expected.split()
+        chunks = (phonemized or "").split(_WORD_SENTINEL)
+        per_word = [
+            (word, _normalize_phonemes(chunks[i]) if i < len(chunks) else "")
+            for i, word in enumerate(words)
+        ]
+        out[clip.idx] = per_word
+    return out
+
+
+def _flat_phonemes(per_word: list[tuple[str, str]]) -> str:
+    """Join per-word normalized phonemes into a flat space-separated string.
+
+    This derives the clip-level phoneme string (consumed by :func:`_per`) from
+    the per-word output of :func:`_phonemize`, so espeak-ng runs once and both
+    the flat and per-word views come from the same call.
+
+    Args:
+        per_word: ``[(word, phonemes), ...]`` for one clip.
+
+    Returns:
+        A normalized space-separated phoneme string.
+    """
+    return _normalize_phonemes(" ".join(ph for _w, ph in per_word))
+
+
+@dataclass
+class _WordScore:
+    """Per-word pronunciation score for one clip.
+
+    Attributes:
+        word: The reference word (orthographic).
+        per: Per-word Phoneme Error Rate (edits assigned to the word / word
+            phoneme count). 0.0 for words with no reference phonemes.
+        n_tokens: Number of reference phoneme tokens in the word.
+    """
+
+    word: str
+    per: float
+    n_tokens: int
+
+
+def _align_words(
+    ref_words: list[tuple[str, str]], hyp_tokens: list[str]
+) -> list[_WordScore]:
+    """Align a recognized phoneme stream to per-word reference phonemes.
+
+    Runs a Levenshtein DP between the concatenated reference phoneme tokens
+    (grouped by word) and the hypothesis tokens, with a backtrace that
+    attributes each edit operation to the word owning the involved reference
+    token. Insertions between two words are assigned to the following word (or
+    to the last word if at the end). Per-word PER is then ``edits / n_tokens``
+    for words with reference phonemes, else ``0.0``.
+
+    The result is an *approximate* per-word diagnostic: CTC decoded phonemes
+    have no explicit word boundaries, so attribution at word edges is best
+    effort. It is meant for ranking systematically problematic words across the
+    corpus, not for exact per-word grading.
+
+    Args:
+        ref_words: ``[(word, normalized_phonemes), ...]`` from :func:`_phonemize`.
+        hyp_tokens: Recognized phoneme tokens (already normalized).
+
+    Returns:
+        A list of :class:`_WordScore`, one per reference word (in order).
+    """
+    # Flatten reference tokens and record the owning word index for each.
+    ref_flat: list[str] = []
+    word_of: list[int] = []
+    word_token_counts: list[int] = []
+    for _word, ph in ref_words:
+        toks = ph.split()
+        word_token_counts.append(len(toks))
+        for t in toks:
+            ref_flat.append(t)
+            word_of.append(len(word_token_counts) - 1)
+    n_words = len(ref_words)
+
+    n, m = len(ref_flat), len(hyp_tokens)
+    # dp[i][j] = edit distance between ref_flat[:i] and hyp_tokens[:j]
+    dp = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(n + 1):
+        dp[i][0] = i
+    for j in range(m + 1):
+        dp[0][j] = j
+    for i in range(1, n + 1):
+        ri = ref_flat[i - 1]
+        for j in range(1, m + 1):
+            cost = 0 if ri == hyp_tokens[j - 1] else 1
+            dp[i][j] = min(
+                dp[i - 1][j] + 1,  # deletion
+                dp[i][j - 1] + 1,  # insertion
+                dp[i - 1][j - 1] + cost,  # match/substitution
+            )
+
+    # Backtrace, counting edits per word.
+    edits_per_word = [0] * n_words
+    i, j = n, m
+    while i > 0 or j > 0:
+        if (
+            i > 0
+            and j > 0
+            and (
+                dp[i][j]
+                == dp[i - 1][j - 1] + (0 if ref_flat[i - 1] == hyp_tokens[j - 1] else 1)
+            )
+        ):
+            # match or substitution: consumes one ref token (word = word_of[i-1])
+            if ref_flat[i - 1] != hyp_tokens[j - 1]:
+                edits_per_word[word_of[i - 1]] += 1
+            i -= 1
+            j -= 1
+        elif i > 0 and dp[i][j] == dp[i - 1][j] + 1:
+            # deletion: ref token dropped (word = word_of[i-1])
+            edits_per_word[word_of[i - 1]] += 1
+            i -= 1
+        else:
+            # insertion: extra hyp token. Attribute to the word we're about to
+            # enter (word_of[i-1] is the last consumed; the next ref token, if
+            # any, belongs to word_of[i]). Assign to the following word, else
+            # to the last word.
+            target = word_of[i] if i < n else n_words - 1
+            if n_words > 0:
+                edits_per_word[target] += 1
+            j -= 1
+
+    scores: list[_WordScore] = []
+    for k, (word, _ph) in enumerate(ref_words):
+        nt = word_token_counts[k]
+        edits = edits_per_word[k]
+        per = edits / nt if nt else 0.0
+        scores.append(_WordScore(word, per, nt))
+    return scores
 
 
 class _PhonemeRecognizer:
@@ -218,15 +379,9 @@ class _PhonemeRecognizer:
         from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 
         device = cfg.phoneme_device
-        if device == "cuda":
-            try:
-                if not torch.cuda.is_available():
-                    logger.warning(
-                        "CUDA not available for phoneme model, falling back to CPU."
-                    )
-                    device = "cpu"
-            except ImportError:
-                device = "cpu"
+        if device == "cuda" and not torch.cuda.is_available():
+            logger.warning("CUDA not available for phoneme model, falling back to CPU.")
+            device = "cpu"
         logger.info("Loading phoneme model '%s' (device=%s)", cfg.phoneme_model, device)
         self._processor = Wav2Vec2Processor.from_pretrained(cfg.phoneme_model)
         self._model = Wav2Vec2ForCTC.from_pretrained(cfg.phoneme_model).to(device)
@@ -286,11 +441,7 @@ class _PhonemeRecognizer:
             padding=True,
         )
         input_values = inputs.input_values.to(self._device)
-        attention_mask = (
-            inputs.attention_mask.to(self._device)
-            if hasattr(inputs, "attention_mask")
-            else None
-        )
+        attention_mask = inputs.attention_mask.to(self._device)
         with torch.no_grad():
             logits = self._model(input_values, attention_mask=attention_mask).logits
         predicted_ids = torch.argmax(logits, dim=-1)
@@ -444,16 +595,9 @@ def _calibration_summary(per_values: list[float], threshold: float) -> dict[str,
     s = sorted(per_values)
     if not s:
         return {
-            "count": 0,
-            "min": 0.0,
-            "p25": 0.0,
-            "median": 0.0,
-            "p75": 0.0,
-            "p90": 0.0,
-            "max": 0.0,
-            "mean": 0.0,
-            "threshold": threshold,
-        }
+            k: 0.0
+            for k in ("count", "min", "p25", "median", "p75", "p90", "max", "mean")
+        } | {"threshold": threshold}
     return {
         "count": len(s),
         "min": s[0],
@@ -503,6 +647,101 @@ def _write_rejected_log(records: list[dict[str, Any]], cfg: common.Config) -> No
     )
 
 
+def _aggregate_word_stats(
+    per_clip_word_scores: list[list[_WordScore]],
+) -> list[dict[str, Any]]:
+    """Aggregate per-word PER across all clips into ranked rows.
+
+    Collects every word's PER across all clips, then returns one row per word
+    sorted by mean PER descending (worst first). Words with no reference
+    phonemes (empty) are excluded.
+
+    Args:
+        per_clip_word_scores: One list of :class:`_WordScore` per clip.
+
+    Returns:
+        A list of dicts with ``word``, ``occurrences``, ``mean_per``,
+        ``min_per``, ``max_per``, ``median_per``.
+    """
+    by_word: dict[str, list[float]] = {}
+    for scores in per_clip_word_scores:
+        for ws in scores:
+            if ws.n_tokens == 0:
+                continue
+            by_word.setdefault(ws.word, []).append(ws.per)
+
+    rows: list[dict[str, Any]] = []
+    for word, pers in by_word.items():
+        pers_sorted = sorted(pers)
+        n = len(pers_sorted)
+        rows.append(
+            {
+                "word": word,
+                "occurrences": n,
+                "mean_per": round(sum(pers_sorted) / n, 4),
+                "min_per": round(pers_sorted[0], 4),
+                "max_per": round(pers_sorted[-1], 4),
+                "median_per": round(_percentile(pers_sorted, 50), 4),
+            }
+        )
+    rows.sort(key=lambda r: r["mean_per"], reverse=True)
+    return rows
+
+
+def _write_word_report(word_rows: list[dict[str, Any]], cfg: common.Config) -> None:
+    """Write the per-word PER CSV report to ``workspace/.pronunciation_words.csv``.
+
+    Args:
+        word_rows: Ranked rows from :func:`_aggregate_word_stats`.
+        cfg: Pipeline configuration.
+    """
+    import csv
+
+    cfg.paths.report.parent.mkdir(parents=True, exist_ok=True)
+    out_path = cfg.paths.report.parent / _WORD_REPORT_NAME
+    with out_path.open("w", encoding="utf-8", newline="") as fout:
+        writer = csv.writer(fout, delimiter="|", quoting=csv.QUOTE_MINIMAL)
+        writer.writerow(
+            ["word", "occurrences", "mean_per", "min_per", "max_per", "median_per"]
+        )
+        for r in word_rows:
+            writer.writerow(
+                [
+                    r["word"],
+                    r["occurrences"],
+                    f"{r['mean_per']:.4f}",
+                    f"{r['min_per']:.4f}",
+                    f"{r['max_per']:.4f}",
+                    f"{r['median_per']:.4f}",
+                ]
+            )
+    logger.info(
+        "Per-word PER report written to %s (%d words)", out_path, len(word_rows)
+    )
+
+
+def _log_worst_words(word_rows: list[dict[str, Any]], top_n: int) -> None:
+    """Log the top-N worst-pronounced words.
+
+    Args:
+        word_rows: Ranked rows from :func:`_aggregate_word_stats`.
+        top_n: Number of words to log.
+    """
+    if not word_rows:
+        return
+    logger.info("Worst-pronounced words (top %d by mean PER):", top_n)
+    for r in word_rows[:top_n]:
+        logger.info(
+            "  %-20s occ=%d mean=%.3f min=%.3f max=%.3f median=%.3f",
+            r["word"],
+            r["occurrences"],
+            r["mean_per"],
+            r["min_per"],
+            r["max_per"],
+            r["median_per"],
+        )
+
+
 def run_pronunciation(cfg: common.Config, calibrate: bool = False) -> dict[str, Any]:
     """Run phoneme-level pronunciation verification on accepted clips.
 
@@ -523,7 +762,8 @@ def run_pronunciation(cfg: common.Config, calibrate: bool = False) -> dict[str, 
     Returns:
         A dict with ``checked``, ``phoneme_rejected``, ``mean_per``,
         ``rejected_records`` and (in calibrate mode) a ``calibration`` block
-        with min/median/max/percentiles.
+        with min/median/max/percentiles. When ``phoneme_word_report`` is
+        enabled, also includes ``worst_words`` (top-N by mean PER).
     """
     common.setup_logging(cfg.paths.log_file)
     common.ensure_dirs(cfg.paths.accepted_wav, cfg.paths.rejected)
@@ -548,8 +788,11 @@ def run_pronunciation(cfg: common.Config, calibrate: bool = False) -> dict[str, 
         }
 
     # --- Reference (espeak-ng) and hypothesis (wav2vec2) phonemes ---
+    # espeak-ng runs once and returns per-word phonemes; the flat clip-level
+    # string consumed by _per is derived from the same output via _flat_phonemes.
     lang_code = common.language_code(cfg.language)
-    ref_map = _phonemize_references(clips, lang_code)
+    ref_words_map = _phonemize(clips, lang_code)
+    ref_map = {idx: _flat_phonemes(pw) for idx, pw in ref_words_map.items()}
     hyp_map = _PhonemeRecognizer(cfg).recognize(clips)
 
     # --- Evaluate (pure) then act or report ---
@@ -586,5 +829,17 @@ def run_pronunciation(cfg: common.Config, calibrate: bool = False) -> dict[str, 
             len(records),
             mean_per,
         )
+
+    # --- Per-word PER report (diagnostic, both modes) ---
+    if cfg.phoneme_word_report and results:
+        per_clip_word_scores: list[list[_WordScore]] = []
+        for r in results:
+            ref_words = ref_words_map.get(r.clip.idx, [])
+            hyp_tokens = r.hyp_phonemes.split()
+            per_clip_word_scores.append(_align_words(ref_words, hyp_tokens))
+        word_rows = _aggregate_word_stats(per_clip_word_scores)
+        _write_word_report(word_rows, cfg)
+        _log_worst_words(word_rows, cfg.phoneme_word_top_n)
+        result["worst_words"] = word_rows[: cfg.phoneme_word_top_n]
 
     return result

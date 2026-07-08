@@ -207,6 +207,33 @@ consider mispronounced while keeping the good ones, then run the step for real:
 poetry run gen-dataset --step pronunciation
 ```
 
+### Per-word PER report
+
+The clip-level PER is a single number: it tells you *that* a clip is
+mispronounced, not *which* words are wrong. To help decide which corpus words
+to remove or reword, the step also ranks reference words by mean PER across
+all checked clips:
+
+- espeak-ng phonemizes the reference **per word** (a sentinel separator
+  preserves word boundaries in the phoneme output).
+- The recognized phoneme stream is aligned to the per-word reference via a
+  Levenshtein DP with backtrace, attributing each edit (substitution /
+  deletion / insertion) to the word owning the involved reference token.
+- Per-word PER is aggregated across all checked clips and ranked worst-first.
+
+Output (gated by `phoneme_word_report`, default on; runs in both normal and
+`--calibrate` mode — it's pure post-processing of already-decoded phonemes,
+no extra inference):
+
+- `workspace/.pronunciation_words.csv` — every word with
+  `word | occurrences | mean_per | min_per | max_per | median_per` (worst first).
+- `report.json` → `pronunciation.worst_words` — top `phoneme_word_top_n` words.
+- A CLI/log block with the same top-N.
+
+Use the CSV to spot words that are systematically problematic (high mean PER
+with several occurrences) and either remove the offending sentences from the
+corpus or reword them.
+
 ## Speaker / voice test
 
 ```bash
@@ -263,6 +290,8 @@ Main parameters:
 | `phoneme_device` | `cuda` | `cuda` or `cpu` (falls back to CPU if CUDA unavailable) |
 | `phoneme_batch_size` | `8` | wav2vec2 CTC batched inference (not thread-safe; uses batching, not workers) |
 | `phoneme_threshold` | `0.30` | PER rejection threshold (tune with `--step pronunciation --calibrate`) |
+| `phoneme_word_report` | `true` | write `workspace/.pronunciation_words.csv` ranking words by mean PER (diagnostic, both modes) |
+| `phoneme_word_top_n` | `20` | number of worst-pronounced words to log and include in `report.json` |
 | `target_sample_rate` | `22050` | output sample rate in Hz |
 | `target_lufs` | `-23.0` | loudness normalization target (EBU R128) |
 | `trim_silence_db` | `60` | dB threshold for silence trimming (higher = less aggressive) |

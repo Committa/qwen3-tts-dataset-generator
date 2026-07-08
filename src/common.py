@@ -327,6 +327,8 @@ class Config:
     phoneme_device: str = "cuda"
     phoneme_batch_size: int = 8
     phoneme_threshold: float = 0.30
+    phoneme_word_report: bool = True
+    phoneme_word_top_n: int = 20
     target_sample_rate: int = 22050
     target_lufs: float = -23.0
     trim_silence_db: float = 60.0
@@ -404,6 +406,10 @@ def load_config(config_path: str | Path | None = None) -> Config:
     cfg.phoneme_device = raw.get("phoneme_device", cfg.phoneme_device)
     cfg.phoneme_batch_size = int(raw.get("phoneme_batch_size", cfg.phoneme_batch_size))
     cfg.phoneme_threshold = float(raw.get("phoneme_threshold", cfg.phoneme_threshold))
+    cfg.phoneme_word_report = bool(
+        raw.get("phoneme_word_report", cfg.phoneme_word_report)
+    )
+    cfg.phoneme_word_top_n = int(raw.get("phoneme_word_top_n", cfg.phoneme_word_top_n))
     cfg.target_sample_rate = int(raw.get("target_sample_rate", cfg.target_sample_rate))
     cfg.target_lufs = float(raw.get("target_lufs", cfg.target_lufs))
     cfg.trim_silence_db = float(raw.get("trim_silence_db", cfg.trim_silence_db))

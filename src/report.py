@@ -97,6 +97,7 @@ def run_report(
             "mean_per": round(pron.get("mean_per", 0.0), 4),
             "threshold": cfg.phoneme_threshold,
             "calibration": pron.get("calibration"),
+            "worst_words": pron.get("worst_words", []),
         },
         "model": {
             "model_size": cfg.model_size,
@@ -170,4 +171,14 @@ def _print_report(report: dict[str, Any]) -> None:
         print(f"  Val manifest          : {m.get('val', 0)} rows")
         print(f"  Train file            : {m.get('manifest_train', '')}")
         print(f"  Val file              : {m.get('manifest_val', '')}")
+    p = report.get("pronunciation", {})
+    worst = p.get("worst_words") or []
+    if worst:
+        print("-" * 60)
+        print(f"  Worst-pronounced words (top {len(worst)} by mean PER):")
+        for w in worst:
+            print(
+                f"    {w['word']:<20} occ={w['occurrences']:<4} "
+                f"mean={w['mean_per']:.3f} max={w['max_per']:.3f}"
+            )
     print("=" * 60 + "\n")
