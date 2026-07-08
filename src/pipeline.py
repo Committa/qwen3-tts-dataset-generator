@@ -11,13 +11,14 @@ from . import build_manifest as man_mod
 from . import common
 from . import generate as gen_mod
 from . import normalize_audio as norm_mod
+from . import pronunciation as pron_mod
 from . import report as rep_mod
 from . import validate as val_mod
 
 logger = logging.getLogger(__name__)
 
-STEPS = ["generate", "validate", "normalize", "publish", "all"]
-STEPS_ORDER = ["generate", "validate", "normalize", "publish"]
+STEPS = ["generate", "validate", "pronunciation", "normalize", "publish", "all"]
+STEPS_ORDER = ["generate", "validate", "pronunciation", "normalize", "publish"]
 
 
 def _maybe_clean_workspace(cfg: common.Config, do_clean: bool, no_clean: bool) -> None:
@@ -100,8 +101,8 @@ def _maybe_clean_workspace(cfg: common.Config, do_clean: bool, no_clean: bool) -
     "--step",
     type=click.Choice(STEPS, case_sensitive=False),
     default="all",
-    help="Run a single pipeline step: generate, validate, normalize, publish "
-    "(manifest+report+archive). Default: all.",
+    help="Run a single pipeline step: generate, validate, pronunciation, "
+    "normalize, publish (manifest+report+archive). Default: all.",
 )
 @click.option(
     "--from",
@@ -109,7 +110,7 @@ def _maybe_clean_workspace(cfg: common.Config, do_clean: bool, no_clean: bool) -
     type=click.Choice(STEPS_ORDER, case_sensitive=False),
     default=None,
     help="Run all steps from this point onward (no auto-clean). "
-    "E.g. --from validate runs validate+normalize+publish.",
+    "E.g. --from validate runs validate+pronunciation+normalize+publish.",
 )
 @click.option(
     "--no-clean",
@@ -124,6 +125,13 @@ def _maybe_clean_workspace(cfg: common.Config, do_clean: bool, no_clean: bool) -
     help="With --step generate: regenerate only previously rejected clips.",
 )
 @click.option(
+    "--calibrate",
+    is_flag=True,
+    default=False,
+    help="With --step pronunciation: measure the PER distribution without "
+    "rejecting anything, to help tune phoneme_threshold.",
+)
+@click.option(
     "--accept",
     "accept_indices",
     type=str,
@@ -136,16 +144,22 @@ def main(
     from_step: str | None,
     no_clean: bool,
     only_rejected: bool,
+    calibrate: bool,
     accept_indices: str | None,
 ) -> None:
     """Orchestrate the TTS dataset pipeline.
 
-    Steps: generate -> validate -> normalize -> publish
+    Steps: generate -> validate -> pronunciation -> normalize -> publish
 
-    - generate:  create audio from text corpus via Qwen3-TTS
-    - validate:  check clips with ASR (faster-whisper) + WER, accept/reject
-    - normalize: resample, loudness, trim silence, 16-bit PCM (in-place on accepted)
-    - publish:   build LJSpeech manifest + report + archive to output/gen{NNN}/
+    - generate:      create audio from text corpus via Qwen3-TTS
+    - validate:      check clips with ASR (faster-whisper) + WER, accept/reject
+    - pronunciation: phoneme-level check (wav2vec2 CTC + espeak-ng PER) on the
+                     WER survivors; rejects bad-pronunciation clips. Gated by
+                     the `phoneme_check` config flag in a full run; an explicit
+                     `--step pronunciation` always runs it (use `--calibrate`
+                     to measure the PER distribution without rejecting).
+    - normalize:     resample, loudness, trim silence, 16-bit PCM (in-place)
+    - publish:       build LJSpeech manifest + report + archive to output/gen{NNN}/
 
     Default (no flags): full run with auto-clean + archive.
     Use --from to resume from a specific step without auto-cleaning.
@@ -184,6 +198,10 @@ def main(
             "--only-rejected can only be used with --step generate "
             "or --from generate."
         )
+    if calibrate and step != "pronunciation":
+        raise click.UsageError(
+            "--calibrate can only be used with --step pronunciation."
+        )
 
     # --- Load config and set up ---
     cfg = common.load_config(config_path)
@@ -197,6 +215,15 @@ def main(
     )
     common.setup_logging(cfg.paths.log_file)
 
+    # Gate the pronunciation step by `phoneme_check` unless the user asked
+    # for it explicitly (e.g. calibrating with phoneme_check disabled).
+    if (
+        "pronunciation" in steps_to_run
+        and not cfg.phoneme_check
+        and step != "pronunciation"
+    ):
+        steps_to_run = [s for s in steps_to_run if s != "pronunciation"]
+
     # Auto-clean workspace on full run (with resume detection)
     _maybe_clean_workspace(cfg, do_clean, no_clean)
 
@@ -209,6 +236,7 @@ def main(
     # --- Run pipeline steps ---
     gen_stats: dict | None = None
     val_stats: dict | None = None
+    pron_stats: dict | None = None
     norm_stats: dict | None = None
     man_stats: dict | None = None
 
@@ -218,12 +246,16 @@ def main(
                 gen_stats = gen_mod.run_generate(cfg, only_rejected=only_rejected)
             elif s == "validate":
                 val_stats = val_mod.run_validate(cfg)
+            elif s == "pronunciation":
+                pron_stats = pron_mod.run_pronunciation(cfg, calibrate=calibrate)
             elif s == "normalize":
                 norm_stats = norm_mod.run_normalize(cfg)
             elif s == "publish":
                 # publish = manifest + report + archive
                 man_stats = man_mod.run_build_manifest(cfg)
-                rep_mod.run_report(cfg, gen_stats, val_stats, norm_stats, man_stats)
+                rep_mod.run_report(
+                    cfg, gen_stats, val_stats, pron_stats, norm_stats, man_stats
+                )
                 gen_number = common.next_gen_number()
                 common.archive_generation(cfg, gen_number)
 

@@ -10,9 +10,11 @@ poetry run gen-dataset --no-clean    # full pipeline without auto-clean
 poetry run gen-dataset --step generate                # single step generate
 poetry run gen-dataset --step generate --only-rejected  # regenerate rejected clips
 poetry run gen-dataset --step validate                # single step validate
+poetry run gen-dataset --step pronunciation           # phoneme-level check (PER)
+poetry run gen-dataset --step pronunciation --calibrate  # measure PER distribution, no rejects
 poetry run gen-dataset --step normalize               # single step normalize
 poetry run gen-dataset --step publish                 # manifest + report + archive
-poetry run gen-dataset --from validate                # validate + normalize + publish
+poetry run gen-dataset --from validate                # validate + pronunciation + normalize + publish
 poetry run gen-dataset --accept 7,13                  # manually accept rejected clips
 poetry run test-gen-dataset          # speaker test (batched by batch_size)
 poetry run test-gen-dataset --model-type base  # override model_type for the test
@@ -34,7 +36,7 @@ poetry run ruff check src            # lint
 - Entry point: `gen-dataset` (from `src/pipeline.py` via Poetry script alias `[tool.poetry.scripts]`). Do NOT run `python src/pipeline.py` directly — relative imports will fail.
 - `src/common.py` defines `Config`/`Paths` dataclasses, `PROJECT_ROOT`, and all shared helpers (logging, checkpoint, OOM detection). All other modules import from here. The `speaker` field on `Config` is the voice identity for both modes (preset name for `custom_voice`, custom voice name under `inputs/voices/` for `base`); `x_vector_only_mode` is a flattened top-level field used only in `base` mode. The `Paths` dataclass holds all pipeline paths: only `input_sentences` and `test_sentences` are configurable in `config.yaml` (top-level keys); all other paths (`raw_wav`, `accepted_wav`, `rejected`, manifests, `report`, `checkpoint`, `log_file`, `prompt_cache`) are fixed defaults defined in `_RUNTIME_PATH_DEFAULTS` and resolved relative to `PROJECT_ROOT`.
 - Config paths in `config.yaml` are resolved relative to `PROJECT_ROOT` (= repo root, computed as `Path(__file__).resolve().parent.parent` in `common.py`).
-- Pipeline steps: `generate` → `validate` → `normalize` → `manifest` → `report`. Each can run standalone via `--step`.
+- Pipeline steps: `generate` → `validate` → `pronunciation` → `normalize` → `publish` (manifest + report + archive). Each can run standalone via `--step`.
 
 ## Model types & voices
 
@@ -44,7 +46,18 @@ poetry run ruff check src            # lint
 - `generate.get_voice_clone_prompt` extracts a `VoiceClonePromptItem` once (cached per-voice per-model-size under `workspace/.voice_cache/<speaker>_<model_size>.pt`, invalidated by fingerprint) and broadcasts it over every batch. The `--only-rejected` regenerate path reuses the same cache.
 - `test_speaker.py` sweeps the universe of the configured `model_type` (preset speakers for `custom_voice`, all voices under `inputs/voices/` for `base`); `--speaker NAME` restricts to one. Both worlds cannot be tested in a single run (different model). Each clip is written next to its exact transcript (`<speaker>_<i>.wav` + `<speaker>_<i>.txt`) in `output/test_speaker/`, ready to be copied into `inputs/voices/` as a voice-cloning reference.
 - **Drift recommendation:** for dataset-scale generation (more than ~100 clips) prefer `base` mode with a single fixed reference clip over `custom_voice` presets. `custom_voice` resamples the speaker stochastically on every call, so variance in F0/formants/pacing accumulates across thousands of clips and degrades downstream training (e.g. Piper). Recommended workflow: generate a 10-15 s reference once with the preset speaker via `test-gen-dataset --model-type custom_voice --speaker <name>`, copy the resulting `.wav`+`.txt` into `inputs/voices/<name>/`, switch to `model_type: "base"` + ICL (`x_vector_only_mode: false`), then run `gen-dataset`. `inputs/test_sentences.txt` is calibrated to produce 10-15 s clips for this purpose. See README "Stable voice for dataset training".
-- Downstream steps (`validate`, `normalize`, `manifest`, `report`) are model-type-agnostic: the model always returns `(wavs, sr)`. Only `generate` and `report` (model section) branch on `model_type`.
+- Downstream steps (`validate`, `pronunciation`, `normalize`, `manifest`, `report`) are model-type-agnostic: the model always returns `(wavs, sr)`. Only `generate` and `report` (model section) branch on `model_type`.
+
+## Pronunciation verification
+
+- `src/pronunciation.py` is a phoneme-level check that complements the word-level WER validation. faster-whisper (grapheme ASR) is forgiving of pronunciation drift: a clip can match the reference transcript (low WER) while the actual pronunciation is wrong, producing artifacts in the downstream training set.
+- The audio is recognised to espeak IPA phonemes by `facebook/wav2vec2-xlsr-53-espeak-cv-ft` (a multilingual wav2vec2 CTC model fine-tuned on Common Voice to output espeak phoneme labels) and compared (Phoneme Error Rate, PER, via `jiwer.wer` on tokenized phoneme sequences) against the `phonemizer`+espeak-ng text→phoneme rendering of the reference sentence. Both sides use the same espeak phoneme inventory, so the comparison is direct.
+- Runs after `validate` on the WER survivors in `accepted_wav/` and before `normalize` (so normalize only processes pronunciation survivors). Clips whose PER exceeds `cfg.phoneme_threshold` are **moved** from `accepted_wav/` to `rejected/` with a `per=... > ...` reason and a `pronunciation.log` JSONL aggregate. The rejected sidecar JSON carries the `index` field, so `--only-rejected` regeneration and `--accept` pick them up unchanged.
+- Reference text source: `common.load_sentences(cfg)` + `int(wav_path.stem)` — the same single source of truth used by validate/manifest/report.
+- Config fields (in `common.py` `Config`, gated by `phoneme_check`): `phoneme_model`, `phoneme_device`, `phoneme_batch_size` (wav2vec2 CTC is not thread-safe; batching is used instead of workers), `phoneme_threshold` (default 0.30 — phoneme recognition is noisier than word ASR). In a full run the step is skipped when `phoneme_check: false`; an explicit `--step pronunciation` always runs it.
+- `--calibrate` (only with `--step pronunciation`): measure-only mode — computes PER for every clip without rejecting anything, prints min/p25/median/p75/p90/max/mean, and returns a `calibration` block. Use it to tune `phoneme_threshold` on a known-good set before committing.
+- System dependency: the `phonemizer` Python lib wraps the **espeak-ng** binary, which must be on PATH. Windows: install the MSI from the espeak-ng GitHub releases (set `PHONEMIZER_ESPEAK_LIBRARY` to `espeak-ng.dll` if needed). Linux: `sudo apt-get install espeak-ng`. On failure the step prints `ESPEAK_HINT` and exits 1.
+- wav2vec2 requires 16 kHz mono float input; `librosa.load(..., sr=16000, mono=True)` resamples from the generator's native rate. `transformers==4.57.3` (pinned by qwen-tts) is compatible with `Wav2Vec2ForCTC`/`Wav2Vec2Processor` — no dependency conflict.
 
 ## Sampling parameters
 

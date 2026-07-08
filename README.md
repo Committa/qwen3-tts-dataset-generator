@@ -21,6 +21,7 @@ Italian, English, Chinese, Japanese, Korean, German, French, Russian, Portuguese
 
 - **Generate** audio from a text corpus via Qwen3-TTS (batch GPU inference with resumable checkpoint)
 - **Validate** each clip with ASR (faster-whisper) + WER, auto-reject low-quality clips
+- **Verify pronunciation** at the phoneme level (wav2vec2 CTC + espeak-ng PER) to catch clips that pass WER but are mispronounced
 - **Normalize** audio: convert to mono, resample to 22050 Hz, loudness normalize (-23 LUFS), trim silence, save as 16-bit PCM
 - **Manifest** in LJSpeech format (filename|text) with deterministic train/val split
 - **Multi-language**: works with any language supported by Qwen3-TTS (Italian, English, Chinese, Japanese, Korean, German, French, Russian, Portuguese, Spanish)
@@ -90,6 +91,7 @@ sentences for testing. Works with any language supported by Qwen3-TTS.
 |------|-------------|
 | `generate` | Create audio from text corpus via Qwen3-TTS (batch GPU inference, resumable) |
 | `validate` | Check each clip with ASR (faster-whisper) + WER, accept/reject |
+| `pronunciation` | Phoneme-level check (wav2vec2 CTC + espeak-ng PER) on the WER survivors |
 | `normalize` | Resample to 22050 Hz, loudness normalize (-23 LUFS), trim silence, 16-bit PCM |
 | `publish` | Build LJSpeech manifest + report + archive to `output/gen{NNN}/` |
 
@@ -110,6 +112,7 @@ poetry run gen-dataset --no-clean
 # Single step
 poetry run gen-dataset --step generate
 poetry run gen-dataset --step validate
+poetry run gen-dataset --step pronunciation
 poetry run gen-dataset --step normalize
 poetry run gen-dataset --step publish
 
@@ -119,7 +122,10 @@ poetry run gen-dataset --from validate
 # Regenerate only rejected clips
 poetry run gen-dataset --step generate --only-rejected
 
-# Manually accept rejected clips (override ASR)
+# Pronunciation calibration: measure the PER distribution without rejecting
+poetry run gen-dataset --step pronunciation --calibrate
+
+# Manually accept rejected clips (override ASR / PER)
 poetry run gen-dataset --accept 7,13
 
 # Help
@@ -130,21 +136,76 @@ poetry run gen-dataset --help
 
 When validation rejects clips, inspect and retry:
 
-1. Check `workspace/rejected/*.json` for expected vs transcription vs WER
+1. Check `workspace/rejected/*.json` for expected vs transcription vs WER/PER
 2. Listen to the rejected wavs in `workspace/rejected/`
-3. If the TTS mispronounced: regenerate + re-validate
-4. If the ASR hallucinated (audio sounds correct): accept manually
+3. If the TTS mispronounced: regenerate + re-validate (+ re-check pronunciation)
+4. If the ASR/PER was wrong (audio sounds correct): accept manually
 5. Publish the final dataset
 
 ```bash
 # Option A: TTS was wrong — regenerate the rejected clips
 poetry run gen-dataset --step generate --only-rejected
-poetry run gen-dataset --step validate
-poetry run gen-dataset --from normalize
+poetry run gen-dataset --from validate      # validate + pronunciation + normalize + publish
 
-# Option B: ASR was wrong — accept manually
+# Option B: ASR/PER was wrong — accept manually
 poetry run gen-dataset --accept 7,13
 poetry run gen-dataset --from normalize
+```
+
+## Pronunciation verification (phoneme-level)
+
+The `validate` step uses faster-whisper, a *word*-level ASR that is forgiving of
+pronunciation drift: a clip can match the reference transcript (low WER) while
+the actual pronunciation is wrong, producing artifacts in the downstream
+training set. The `pronunciation` step catches these by checking at the
+*phoneme* level:
+
+- The audio is recognised to espeak IPA phonemes by
+  [`facebook/wav2vec2-xlsr-53-espeak-cv-ft`](https://huggingface.co/facebook/wav2vec2-xlsr-53-espeak-cv-ft)
+  (a multilingual wav2vec2 CTC model fine-tuned to output espeak phoneme
+  labels).
+- The reference sentence is converted to phonemes with **espeak-ng** via the
+  `phonemizer` library.
+- The two phoneme sequences are compared with the **Phoneme Error Rate** (PER),
+  computed with `jiwer` (the same library used for WER). Both sides use the
+  same espeak phoneme inventory, so the comparison is direct.
+- Clips whose PER exceeds `phoneme_threshold` (default `0.30` — phoneme
+  recognition is noisier than word ASR) are moved from `accepted_wav/` to
+  `rejected/` and feed back into the `--only-rejected` regeneration loop.
+
+The step runs after `validate` (on the WER survivors) and before `normalize`
+(so normalize only processes pronunciation survivors). It is gated by the
+`phoneme_check` config flag in a full run; an explicit `--step pronunciation`
+always runs it.
+
+### System dependency: espeak-ng
+
+The `phonemizer` library wraps the **espeak-ng** binary, which must be on PATH.
+
+- **Windows**: install the MSI from the
+  [espeak-ng GitHub releases](https://github.com/espeak-ng/espeak-ng/releases).
+  If `phonemizer` cannot find it, set the `PHONEMIZER_ESPEAK_LIBRARY`
+  environment variable to the `espeak-ng.dll` path.
+- **Linux** (Debian/Ubuntu): `sudo apt-get install espeak-ng`.
+
+If espeak-ng is missing, the step prints a hint and exits with code 1.
+
+### Tuning the threshold
+
+PER absolute values depend on the model and the phoneme normalization, so pick
+the threshold empirically on a known-good set:
+
+```bash
+poetry run gen-dataset --step pronunciation --calibrate
+```
+
+This measures the PER for every clip **without rejecting anything** and prints
+the distribution (min / p25 / median / p75 / p90 / max / mean). Set
+`phoneme_threshold` in `config.yaml` to a value that rejects clips you
+consider mispronounced while keeping the good ones, then run the step for real:
+
+```bash
+poetry run gen-dataset --step pronunciation
 ```
 
 ## Speaker / voice test
@@ -198,6 +259,11 @@ Main parameters:
 | `asr_compute_type` | `float16` | `float16`, `int8`, etc. — affects ASR performance |
 | `asr_workers` | `1` | parallel ASR transcriptions (`1`=sequential; `>1`=thread pool, faster-whisper runs them concurrently via `num_workers`; memory grows with workers) |
 | `wer_threshold` | `0.20` | WER rejection threshold (clips above this are rejected) |
+| `phoneme_check` | `false` | enable the `pronunciation` step in a full run (an explicit `--step pronunciation` always runs it) |
+| `phoneme_model` | `facebook/wav2vec2-xlsr-53-espeak-cv-ft` | wav2vec2 CTC model used for phoneme recognition |
+| `phoneme_device` | `cuda` | `cuda` or `cpu` (falls back to CPU if CUDA unavailable) |
+| `phoneme_batch_size` | `8` | wav2vec2 CTC batched inference (not thread-safe; uses batching, not workers) |
+| `phoneme_threshold` | `0.30` | PER rejection threshold (tune with `--step pronunciation --calibrate`) |
 | `target_sample_rate` | `22050` | output sample rate in Hz |
 | `target_lufs` | `-23.0` | loudness normalization target (EBU R128) |
 | `trim_silence_db` | `60` | dB threshold for silence trimming (higher = less aggressive) |
@@ -380,7 +446,8 @@ voice-cloning reference.
 ├── src/
 │   ├── common.py           # shared utilities
 │   ├── generate.py         # audio generation
-│   ├── validate.py         # ASR validation
+│   ├── validate.py         # ASR validation (WER)
+│   ├── pronunciation.py    # phoneme-level verification (PER)
 │   ├── normalize_audio.py  # audio normalization
 │   ├── build_manifest.py   # LJSpeech manifest
 │   ├── report.py           # final report

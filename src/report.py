@@ -27,6 +27,7 @@ def run_report(
     cfg: common.Config,
     generate_stats: dict | None = None,
     validate_stats: dict | None = None,
+    pronunciation_stats: dict | None = None,
     normalize_stats: dict | None = None,
     manifest_stats: dict | None = None,
 ) -> dict[str, Any]:
@@ -40,6 +41,7 @@ def run_report(
         cfg: Pipeline configuration.
         generate_stats: Output from run_generate, if available.
         validate_stats: Output from run_validate, if available.
+        pronunciation_stats: Output from run_pronunciation, if available.
         normalize_stats: Output from run_normalize, if available.
         manifest_stats: Output from run_build_manifest, if available.
 
@@ -62,6 +64,7 @@ def run_report(
     # --- Assemble report ---
     mean_wer = (validate_stats or {}).get("mean_wer", 0.0)
     skipped_gen = (generate_stats or {}).get("skipped", 0)
+    pron = pronunciation_stats or {}
 
     report = {
         "totals": {
@@ -73,6 +76,8 @@ def run_report(
         "quality": {
             "mean_wer": round(mean_wer, 4),
             "wer_threshold": cfg.wer_threshold,
+            "mean_per": round(pron.get("mean_per", 0.0), 4),
+            "phoneme_threshold": cfg.phoneme_threshold,
         },
         "audio": {
             "total_duration_seconds": round(total_duration, 2),
@@ -84,6 +89,15 @@ def run_report(
         "generation_time_seconds": round(
             (generate_stats or {}).get("time_seconds", 0.0), 2
         ),
+        "pronunciation": {
+            "enabled": cfg.phoneme_check,
+            "model": cfg.phoneme_model,
+            "checked": pron.get("checked", 0),
+            "phoneme_rejected": pron.get("phoneme_rejected", 0),
+            "mean_per": round(pron.get("mean_per", 0.0), 4),
+            "threshold": cfg.phoneme_threshold,
+            "calibration": pron.get("calibration"),
+        },
         "model": {
             "model_size": cfg.model_size,
             "model_type": cfg.model_type,
@@ -138,6 +152,9 @@ def _print_report(report: dict[str, Any]) -> None:
     q = report["quality"]
     print(
         f"  Mean WER              : {q['mean_wer']:.4f}  (threshold {q['wer_threshold']})"
+    )
+    print(
+        f"  Mean PER              : {q['mean_per']:.4f}  (threshold {q['phoneme_threshold']})"
     )
     a = report["audio"]
     print(

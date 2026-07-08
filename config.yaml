@@ -1,7 +1,7 @@
 ## Model ----------------------------------------------------------------------
 
 model_size: "1.7b"
-model_type: "custom_voice"   # "custom_voice" (Qwen preset speakers) | "base" (voice clone from inputs/voices/)
+model_type: "base"   # "custom_voice" (Qwen preset speakers) | "base" (voice clone from inputs/voices/)
 dtype: "bfloat16"
 device_map: "cuda:0"
 attn_implementation: "sdpa"
@@ -27,7 +27,7 @@ x_vector_only_mode: false    # false=ICL (best quality, needs inputs/voices/<spe
 
 ## Generation ----------------------------------------------------------------
 
-batch_size: 3
+batch_size: 2
 seed: 42
 max_new_tokens: 512
 mem_cleanup_every_n_batches: 100   # free GPU allocator pool every N batches to prevent VRAM fragmentation
@@ -37,9 +37,9 @@ mem_cleanup_every_n_batches: 100   # free GPU allocator pool every N batches to 
 # temperature is the main lever for cross-clip consistency: lower => the
 # distribution is more peaked => less variance in tone/pauses/intonation
 # across clips. The model is tuned at 0.9 (see the checkpoint's
-# generation_config.json); going well below ~0.6 takes it out of distribution
-# and can trigger EOS-collapse: the model emits the end-of-speech token
-# prematurely and the clip is truncated to a few words + silence.
+# generation_config.json); going too low takes it out of distribution and
+# can trigger EOS-collapse (the model emits the end-of-speech token
+# prematurely, truncating the clip to a few words + silence).
 # Truncated clips have high WER and are rejected by the `validate` step;
 # regenerate them with: poetry run gen-dataset --step generate --only-rejected
 #
@@ -55,18 +55,40 @@ mem_cleanup_every_n_batches: 100   # free GPU allocator pool every N batches to 
 # Values below prioritize maximum homogeneity (consistency) over avoiding
 # truncation; failed clips are recovered via validate -> --only-rejected.
 do_sample: true
-temperature: 0.3              # main consistency lever; 0.9 = author default (varied)
+temperature: 0.4              # main consistency lever; 0.9 = author default (varied)
 top_k: 50                     # candidate-token truncation; 50 = author default
 top_p: 1.0                    # keep 1.0 at low temp (see comment above)
 repetition_penalty: 1.05      # >1 discourages token loops; 1.05 = author default
 
 ## Validation ----------------------------------------------------------------
 
-asr_model: "medium"
+asr_model: "large-v3"
 asr_device: "cuda"
 asr_compute_type: "float16"
 asr_workers: 2                # parallel ASR transcriptions (1=sequential; >1=thread pool, faster-whisper runs them concurrently via num_workers; memory grows with workers)
 wer_threshold: 0.15
+
+## Pronunciation -------------------------------------------------------------
+# Phoneme-level verification: catches clips that pass WER but whose actual
+# pronunciation is wrong. The audio is recognised to espeak phonemes by a
+# wav2vec2 CTC model and compared (PER = Phoneme Error Rate) against the
+# espeak-ng text->phoneme rendering of the reference sentence.
+#
+# Requires the espeak-ng binary on PATH (the `phonemizer` library wraps it).
+#   Windows : install the MSI from https://github.com/espeak-ng/espeak-ng/releases
+#             and, if needed, set PHONEMIZER_ESPEAK_LIBRARY to espeak-ng.dll.
+#   Linux   : sudo apt-get install espeak-ng
+#
+# `phoneme_check` gates the step in a full `gen-dataset` run; an explicit
+# `--step pronunciation` always runs it (also with `--calibrate` to measure
+# the PER distribution without rejecting anything, useful to tune the
+# threshold). Run between `validate` and `normalize` so normalize only
+# processes pronunciation survivors.
+phoneme_check: true
+phoneme_model: "facebook/wav2vec2-xlsr-53-espeak-cv-ft"
+phoneme_device: "cuda"
+phoneme_batch_size: 8         # wav2vec2 CTC batched inference (not thread-safe; uses batching, not workers)
+phoneme_threshold: 0.30       # PER reject cutoff; phoneme recognition is noisier than word ASR
 
 ## Normalization ------------------------------------------------------------
 

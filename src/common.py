@@ -316,6 +316,17 @@ class Config:
     asr_compute_type: str = "float16"
     asr_workers: int = 1
     wer_threshold: float = 0.15
+    # Pronunciation verification (phoneme-level). Catches clips that pass WER
+    # but whose actual pronunciation is wrong: the audio is recognised to
+    # espeak phonemes by a wav2vec2 CTC model and compared (PER) against the
+    # espeak-ng text->phoneme rendering of the reference sentence. See
+    # src/pronunciation.py. `phoneme_check` gates the step in the full
+    # pipeline run; an explicit `--step pronunciation` always runs it.
+    phoneme_check: bool = False
+    phoneme_model: str = "facebook/wav2vec2-xlsr-53-espeak-cv-ft"
+    phoneme_device: str = "cuda"
+    phoneme_batch_size: int = 8
+    phoneme_threshold: float = 0.30
     target_sample_rate: int = 22050
     target_lufs: float = -23.0
     trim_silence_db: float = 60.0
@@ -388,6 +399,11 @@ def load_config(config_path: str | Path | None = None) -> Config:
     cfg.asr_compute_type = raw.get("asr_compute_type", cfg.asr_compute_type)
     cfg.asr_workers = int(raw.get("asr_workers", cfg.asr_workers))
     cfg.wer_threshold = float(raw.get("wer_threshold", cfg.wer_threshold))
+    cfg.phoneme_check = bool(raw.get("phoneme_check", cfg.phoneme_check))
+    cfg.phoneme_model = raw.get("phoneme_model", cfg.phoneme_model)
+    cfg.phoneme_device = raw.get("phoneme_device", cfg.phoneme_device)
+    cfg.phoneme_batch_size = int(raw.get("phoneme_batch_size", cfg.phoneme_batch_size))
+    cfg.phoneme_threshold = float(raw.get("phoneme_threshold", cfg.phoneme_threshold))
     cfg.target_sample_rate = int(raw.get("target_sample_rate", cfg.target_sample_rate))
     cfg.target_lufs = float(raw.get("target_lufs", cfg.target_lufs))
     cfg.trim_silence_db = float(raw.get("trim_silence_db", cfg.trim_silence_db))
