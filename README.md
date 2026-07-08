@@ -12,9 +12,7 @@ with deterministic train/val split. Works with any language supported by Qwen3-T
 Italian, English, Chinese, Japanese, Korean, German, French, Russian, Portuguese, Spanish.
 
 > Developed and tested on **NVIDIA RTX 4070 (12 GB VRAM)**. Compatible with any NVIDIA GPU
-> with CUDA 12.4+. The 1.7B model runs on 12 GB with `batch_size: 2` (or `1`); for extra
-> headroom when also loading ASR and phoneme models, reduce `batch_size`. OOM is handled
-> with a clear message and suggestion.
+> with CUDA 12.4+. OOM is handled with a clear message and suggestion.
 
 ---
 
