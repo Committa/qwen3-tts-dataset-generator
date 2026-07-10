@@ -65,22 +65,8 @@ repetition_penalty: 1.05      # >1 discourages token loops; 1.05 = author defaul
 asr_model: "large-v3"
 asr_device: "cuda"
 asr_compute_type: "float16"
-# Parallel ASR transcriptions. Maps to CTranslate2 `inter_threads`: concurrent
-# transcribe() calls share one model instance. On CPU this gives real
-# parallelism (one core per worker); on a single GPU the scheduler serializes
-# kernels, so the only gain is overlapping CPU-bound prep (audio decode, VAD,
-# feature extraction) with GPU inference. For short clips (~3-8 s) the per-clip
-# CPU prep is significant and GIL-serialized, so the overlap is limited and
-# throughput plateaus quickly — doubling workers past ~2 rarely helps. Memory
-# grows with workers. Set 1 if unsure.
-asr_workers: 4
-# Beam size for the ASR decoder. 5 = author default (max accuracy). 1 = greedy
-# decoding (lowest cost). The WER threshold is a binary accept/reject gate, not
-# a precision transcript, so greedy is adequate for validation. Reducing this
-# speeds up the GPU decoder step, but only matters when the decoder is the
-# bottleneck — if throughput is CPU/GIL-bound (short clips, fast GPU), the
-# effect on overall wav/s is negligible.
-asr_beam_size: 5
+asr_workers: 4                # concurrent transcribe() calls (CTranslate2 inter_threads). On GPU the gain is marginal: throughput is CPU/GIL-bound, not GPU-bound. Set 1 if unsure.
+asr_beam_size: 5              # beam size for ASR decoder (5=author default, 1=greedy). Speeds up the GPU decoder step, but has little effect on overall wav/s when throughput is CPU-bound.
 wer_threshold: 0.15
 
 ## Pronunciation -------------------------------------------------------------
