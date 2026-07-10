@@ -35,6 +35,7 @@ def _normalize_text(text: str, lang_code: str | None = None) -> str:
     text = unicodedata.normalize("NFKD", text).encode("ASCII", "ignore").decode("ASCII")
     text = text.lower().strip()
     text = re.sub(r"\b(\d+)[.,:;](00)\b", r"\1", text)
+    text = re.sub(r"(?<=\d)[.,](?=\d)", "", text)
     text = re.sub(r"[^\w\s]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
