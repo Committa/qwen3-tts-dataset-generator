@@ -398,7 +398,13 @@ def run_validate(cfg: common.Config) -> dict[str, Any]:
     # --- Validate each clip ---
     wer_values: list[float] = []
     rejected_records: list[dict[str, Any]] = []
-    progress = tqdm(total=len(work), desc="validate", unit="wav", dynamic_ncols=True)
+    progress = tqdm(
+        total=skipped + len(work),
+        initial=skipped,
+        desc="validate",
+        unit="wav",
+        dynamic_ncols=True,
+    )
 
     def _save_ckpt() -> None:
         _write_validate_checkpoint(
