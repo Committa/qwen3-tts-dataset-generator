@@ -411,46 +411,49 @@ def run_generate(cfg: common.Config, only_rejected: bool = False) -> dict[str, A
     )
 
     batch_num = 0
-    for start in range(0, len(pending_idx), batch):
-        batch_idxs = pending_idx[start : start + batch]
-        batch_texts = [sentences[i] for i in batch_idxs]
-        try:
-            wavs = _generate_batch(
-                model, batch_texts, cfg, voice_clone_prompt=voice_clone_prompt
-            )
-        except SystemExit:
-            raise
-        except Exception as e:
-            # MemoryError is a subclass of Exception and is treated as OOM:
-            # log the hint, persist checkpoint, and exit with code 2.
-            if common.is_oom_error(e):
-                common.write_checkpoint(cfg.paths.checkpoint, done)
-                common.exit_on_oom(e, logger)
-            logger.warning("Batch failed (idx %s): %s", batch_idxs, e)
-            skipped += len(batch_idxs)
-            progress.update(len(batch_idxs))
-            continue
-
-        # --- Persist each clip in the batch ---
-        for idx, (wav, sr) in zip(batch_idxs, wavs):
-            if wav is None or len(wav) == 0:
-                logger.warning("Empty clip at idx %d, skipped.", idx)
-                skipped += 1
-                continue
-            out_path = cfg.paths.raw_wav / f"{idx:06d}.wav"
+    try:
+        for start in range(0, len(pending_idx), batch):
+            batch_idxs = pending_idx[start : start + batch]
+            batch_texts = [sentences[i] for i in batch_idxs]
             try:
-                sf.write(str(out_path), wav, sr)
+                wavs = _generate_batch(
+                    model, batch_texts, cfg, voice_clone_prompt=voice_clone_prompt
+                )
+            except SystemExit:
+                raise
             except Exception as e:
-                logger.warning("Save failed for idx %d: %s", idx, e)
-                skipped += 1
+                if common.is_oom_error(e):
+                    common.write_checkpoint(cfg.paths.checkpoint, done)
+                    common.exit_on_oom(e, logger)
+                logger.warning("Batch failed (idx %s): %s", batch_idxs, e)
+                skipped += len(batch_idxs)
+                progress.update(len(batch_idxs))
                 continue
-            generated += 1
-            done.add(idx)
-        progress.update(len(batch_idxs))
+
+            for idx, (wav, sr) in zip(batch_idxs, wavs):
+                if wav is None or len(wav) == 0:
+                    logger.warning("Empty clip at idx %d, skipped.", idx)
+                    skipped += 1
+                    continue
+                out_path = cfg.paths.raw_wav / f"{idx:06d}.wav"
+                try:
+                    sf.write(str(out_path), wav, sr)
+                except Exception as e:
+                    logger.warning("Save failed for idx %d: %s", idx, e)
+                    skipped += 1
+                    continue
+                generated += 1
+                done.add(idx)
+            progress.update(len(batch_idxs))
+            common.write_checkpoint(cfg.paths.checkpoint, done)
+            batch_num += 1
+            if batch_num % cfg.mem_cleanup_every_n_batches == 0:
+                common.cleanup_gpu(log=logger)
+    except KeyboardInterrupt:
+        logger.warning("Interrupted by user. Saving checkpoint and exiting...")
         common.write_checkpoint(cfg.paths.checkpoint, done)
-        batch_num += 1
-        if batch_num % cfg.mem_cleanup_every_n_batches == 0:
-            common.cleanup_gpu(log=logger)
+        progress.close()
+        raise SystemExit(1)
 
     progress.close()
     elapsed = time.time() - start_time

@@ -410,16 +410,21 @@ class _PhonemeRecognizer:
         progress = tqdm(
             total=len(clips), desc="pronunciation", unit="wav", dynamic_ncols=True
         )
-        for i in range(0, len(clips), self._batch_size):
-            chunk = clips[i : i + self._batch_size]
-            arrays = [
-                librosa.load(str(c.wav_path), sr=_PHONEME_SAMPLE_RATE, mono=True)[0]
-                for c in chunk
-            ]
-            decoded = self._decode_batch(arrays)
-            for c, ph in zip(chunk, decoded):
-                hyp[c.idx] = _normalize_phonemes(ph or "")
-            progress.update(len(chunk))
+        try:
+            for i in range(0, len(clips), self._batch_size):
+                chunk = clips[i : i + self._batch_size]
+                arrays = [
+                    librosa.load(str(c.wav_path), sr=_PHONEME_SAMPLE_RATE, mono=True)[0]
+                    for c in chunk
+                ]
+                decoded = self._decode_batch(arrays)
+                for c, ph in zip(chunk, decoded):
+                    hyp[c.idx] = _normalize_phonemes(ph or "")
+                progress.update(len(chunk))
+        except KeyboardInterrupt:
+            logger.warning("Interrupted by user.")
+            progress.close()
+            raise SystemExit(1)
         progress.close()
         return hyp
 

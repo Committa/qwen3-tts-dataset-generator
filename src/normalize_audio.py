@@ -128,13 +128,18 @@ def run_normalize(cfg: common.Config) -> dict[str, Any]:
     ok = 0
     failed = 0
     progress = tqdm(files, desc="normalize", unit="wav", dynamic_ncols=True)
-    for wav_path in progress:
-        success, msg = _process_file(wav_path, cfg)
-        if success:
-            ok += 1
-        else:
-            failed += 1
-            logger.warning("Normalization failed %s: %s", wav_path.name, msg)
+    try:
+        for wav_path in progress:
+            success, msg = _process_file(wav_path, cfg)
+            if success:
+                ok += 1
+            else:
+                failed += 1
+                logger.warning("Normalization failed %s: %s", wav_path.name, msg)
+    except KeyboardInterrupt:
+        logger.warning("Interrupted by user.")
+        progress.close()
+        raise SystemExit(1)
     progress.close()
     logger.info(
         "Normalization: ok=%d failed=%d (target=%dHz, %.1f LUFS)",
