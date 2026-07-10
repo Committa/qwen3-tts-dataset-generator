@@ -283,7 +283,8 @@ Main parameters:
 | `asr_model` | `medium` | faster-whisper model size (`tiny`/`base`/`small`/`medium`/`large-v3`) |
 | `asr_device` | `cuda` | `cuda` or `cpu` |
 | `asr_compute_type` | `float16` | `float16`, `int8`, etc. — affects ASR performance |
-| `asr_workers` | `1` | parallel ASR transcriptions (`1`=sequential; `>1`=thread pool, faster-whisper runs them concurrently via `num_workers`; memory grows with workers) |
+| `asr_workers` | `1` | parallel ASR transcriptions (`1`=sequential; `>1`=thread pool, faster-whisper runs them concurrently via `num_workers`; memory grows with workers). On a single GPU the benefit is marginal — throughput is GPU-bound. |
+| `asr_beam_size` | `5` | beam size for the ASR decoder (`5`=author default; `1`=greedy, ~3-5x faster on short clips with negligible WER impact). Primary lever for validate throughput on GPU. |
 | `wer_threshold` | `0.20` | WER rejection threshold (clips above this are rejected) |
 | `phoneme_check` | `false` | enable the `pronunciation` step in a full run (an explicit `--step pronunciation` always runs it) |
 | `phoneme_model` | `facebook/wav2vec2-xlsr-53-espeak-cv-ft` | wav2vec2 CTC model used for phoneme recognition |

@@ -65,7 +65,18 @@ repetition_penalty: 1.05      # >1 discourages token loops; 1.05 = author defaul
 asr_model: "large-v3"
 asr_device: "cuda"
 asr_compute_type: "float16"
-asr_workers: 2                # parallel ASR transcriptions (1=sequential; >1=thread pool, faster-whisper runs them concurrently via num_workers; memory grows with workers)
+# Parallel ASR transcriptions. Maps to CTranslate2 `inter_threads` so that
+# concurrent transcribe() calls share the model with real parallelism on CPU
+# (one core per worker). On a single GPU the benefit is marginal: the CUDA
+# scheduler serializes kernels, so extra workers mostly overlap CPU prep
+# (VAD, audio load) with GPU inference — past 2-4 workers throughput is
+# GPU-bound and flat. Memory grows with workers. Set 1 if unsure.
+asr_workers: 4
+# Beam size for the ASR decoder. 5 = author default (max accuracy). 1 = greedy
+# decoding, ~3-5x faster on short clips with negligible WER impact (the WER
+# threshold is a binary accept/reject gate, not a precision transcript).
+# This is the primary lever for validate throughput on GPU.
+asr_beam_size: 5
 wer_threshold: 0.15
 
 ## Pronunciation -------------------------------------------------------------

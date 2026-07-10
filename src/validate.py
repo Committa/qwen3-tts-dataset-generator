@@ -89,12 +89,19 @@ def _load_asr(cfg: common.Config):
     )
 
 
-def _transcribe(asr_model, wav_path: Path, lang_code: str) -> str:
-    """Transcribe a single wav file and return the joined segment text."""
+def _transcribe(asr_model, wav_path: Path, lang_code: str, beam_size: int) -> str:
+    """Transcribe a single wav file and return the joined segment text.
+
+    Args:
+        asr_model: Loaded faster-whisper model.
+        wav_path: Path to the wav file to transcribe.
+        lang_code: ISO language code for transcription.
+        beam_size: Beam size for the decoder (1 = greedy, 5 = author default).
+    """
     segments, _info = asr_model.transcribe(
         str(wav_path),
         language=lang_code,
-        beam_size=5,
+        beam_size=beam_size,
         vad_filter=True,
     )
     return " ".join(seg.text.strip() for seg in segments)
@@ -133,7 +140,7 @@ def _validate_one(
         "expected": expected,
     }
     try:
-        transcription = _transcribe(asr_model, wav_path, lang_code)
+        transcription = _transcribe(asr_model, wav_path, lang_code, cfg.asr_beam_size)
     except Exception as e:
         logger.warning("ASR failed for %s: %s", wav_path.name, e)
         return {
@@ -189,7 +196,13 @@ def _handle_result(
         logger.info("ACCEPTED idx=%d WER=%.3f -> %s", idx, res["wer"], dest.name)
         return "accepted"
     _move_to_rejected(
-        wav_path, cfg, idx, res["expected"], res["transcription"], res["reason"], res["wer"]
+        wav_path,
+        cfg,
+        idx,
+        res["expected"],
+        res["transcription"],
+        res["reason"],
+        res["wer"],
     )
     rec: dict[str, Any] = {"index": idx, "file": wav_path.name, "reason": res["reason"]}
     if res["wer"] is not None:

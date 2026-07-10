@@ -319,6 +319,7 @@ class Config:
     asr_device: str = "cuda"
     asr_compute_type: str = "float16"
     asr_workers: int = 1
+    asr_beam_size: int = 5
     wer_threshold: float = 0.15
     # Pronunciation verification (phoneme-level). Catches clips that pass WER
     # but whose actual pronunciation is wrong: the audio is recognised to
@@ -404,6 +405,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
     cfg.asr_device = raw.get("asr_device", cfg.asr_device)
     cfg.asr_compute_type = raw.get("asr_compute_type", cfg.asr_compute_type)
     cfg.asr_workers = int(raw.get("asr_workers", cfg.asr_workers))
+    cfg.asr_beam_size = int(raw.get("asr_beam_size", cfg.asr_beam_size))
     cfg.wer_threshold = float(raw.get("wer_threshold", cfg.wer_threshold))
     cfg.phoneme_check = bool(raw.get("phoneme_check", cfg.phoneme_check))
     cfg.phoneme_model = raw.get("phoneme_model", cfg.phoneme_model)
