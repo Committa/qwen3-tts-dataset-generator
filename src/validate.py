@@ -36,6 +36,12 @@ PERCENTAGE_PATTERNS: dict[str, str] = {
     "nl": r"\bprocent\b",
 }
 
+# Languages with full number normalization (alpha2digit support).
+# For other languages (ZH, JA, KO, RU, etc.) only basic text cleanup is applied.
+NORMALIZATION_LANGUAGES: frozenset[str] = frozenset(
+    {"it", "en", "fr", "de", "es", "pt", "nl"}
+)
+
 
 def _digits_to_words(text: str, lang_code: str) -> str:
     """Convert standalone digit tokens to words using num2words.
@@ -62,6 +68,13 @@ def _normalize_text(text: str, lang_code: str | None = None) -> str:
     # 1. Smart quotes -> ASCII
     text = text.replace("\u2018", "'").replace("\u2019", "'")
     text = text.replace("\u201c", '"').replace("\u201d", '"')
+
+    # For languages without full number normalization, skip conversion steps
+    if lang_code is None or lang_code not in NORMALIZATION_LANGUAGES:
+        text = text.lower().strip()
+        text = re.sub(r"[^\w\s]", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
 
     # 2. Percentage expression -> "%" (language-specific)
     if lang_code is not None:

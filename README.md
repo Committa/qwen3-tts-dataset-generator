@@ -94,6 +94,12 @@ sentences for testing. Works with any language supported by Qwen3-TTS.
 | `normalize` | Resample to 22050 Hz, loudness normalize (-23 LUFS), trim silence, 16-bit PCM |
 | `publish` | Build LJSpeech manifest + report + archive to `output/gen{NNN}/` |
 
+> **Language support for number normalization:** Full word-to-digit conversion
+> (alpha2digit + num2words) is available for Italian, English, French, Spanish,
+> Portuguese, German, and Dutch. For other languages (Chinese, Japanese, Korean,
+> Russian, etc.), validation runs with basic text cleanup only — number words
+> are compared verbatim without normalization.
+
 ### Commands
 
 ```bash
