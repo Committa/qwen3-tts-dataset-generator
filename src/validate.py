@@ -328,8 +328,8 @@ def _write_rejected_log(rejected_dir: Path, records: list[dict[str, Any]]) -> No
     )
 
 
-def run_validate(cfg: common.Config) -> dict[str, Any]:
-    """Run ASR validation on all generated clips.
+def run_validate(cfg: common.Config, only_rejected: bool = False) -> dict[str, Any]:
+    """Run ASR validation on generated clips.
 
     Transcribes each raw wav with faster-whisper, computes WER against the
     expected text, and moves clips to accepted_wav/ or rejected/ based on the
@@ -339,8 +339,13 @@ def run_validate(cfg: common.Config) -> dict[str, Any]:
     batching requests on the GPU or using multiple CPU cores. Memory usage grows
     with the number of workers.
 
+    When ``only_rejected=True`` only clips previously rejected (by any step)
+    are re-validated. Their wav files are moved from ``rejected/`` back to
+    ``raw_wav/`` and old sidecar metadata is cleaned up before validation.
+
     Args:
         cfg: Pipeline configuration.
+        only_rejected: If True, only re-validate previously rejected clips.
 
     Returns:
         Dict with accepted/rejected counts, mean WER, and rejected records.
@@ -348,10 +353,55 @@ def run_validate(cfg: common.Config) -> dict[str, Any]:
     common.setup_logging(cfg.paths.log_file)
     common.ensure_dirs(cfg.paths.accepted_wav, cfg.paths.rejected)
 
-    # --- Load corpus and ASR model ---
+    # --- Load corpus ---
     sentences = common.load_sentences(cfg)
     lang_code = common.language_code(cfg.language)
     raw_dir = cfg.paths.raw_wav
+    rejected_dir = cfg.paths.rejected
+
+    # --- Load validate checkpoint (needed early for --only-rejected) ---
+    ckpt = _read_validate_checkpoint(cfg.paths.validate_checkpoint)
+    done: set[int] = ckpt["done"]
+    accepted = ckpt["accepted_count"]
+    rejected = ckpt["rejected_count"]
+    wer_sum = ckpt["wer_sum"]
+    wer_count = ckpt["wer_count"]
+
+    # --- Handle --only-rejected mode ---
+    rejected_indices: set[int] = set()
+    if only_rejected:
+        rejected_indices = common.read_rejected_indices(cfg)
+        if not rejected_indices:
+            logger.info("No rejected clips to re-validate.")
+            return {"accepted": 0, "rejected": 0, "mean_wer": 0.0}
+
+        # Remove rejected indices from done and persist immediately,
+        # before any sidecar cleanup, so a crash during cleanup is safe.
+        done -= rejected_indices
+        _write_validate_checkpoint(
+            cfg.paths.validate_checkpoint, done, accepted, rejected, wer_sum, wer_count
+        )
+        logger.info(
+            "--only-rejected: %d clips scheduled for re-validation.",
+            len(rejected_indices),
+        )
+
+        # Copy rejected wavs back to raw_wav (if missing) and clean old artifacts.
+        for idx in rejected_indices:
+            wav_name = f"{idx:06d}.wav"
+            src = rejected_dir / wav_name
+            dst = raw_dir / wav_name
+            if not dst.exists() and src.exists():
+                shutil.copy2(str(src), str(dst))
+            if src.exists():
+                src.unlink()
+            if not dst.exists():
+                logger.warning("Rejected wav not found for idx=%d.", idx)
+            json_path = rejected_dir / f"{idx:06d}.json"
+            if json_path.exists():
+                json_path.unlink()
+
+    # --- Load ASR model ---
     files = sorted(raw_dir.glob("*.wav"))
     if not files:
         logger.warning("No wav files in %s. Run generate step first.", raw_dir)
@@ -371,13 +421,9 @@ def run_validate(cfg: common.Config) -> dict[str, Any]:
         logger.warning("No in-range clips to validate.")
         return {"accepted": 0, "rejected": 0, "mean_wer": 0.0}
 
-    # --- Load validate checkpoint (resume detection) ---
-    ckpt = _read_validate_checkpoint(cfg.paths.validate_checkpoint)
-    done: set[int] = ckpt["done"]
-    accepted = ckpt["accepted_count"]
-    rejected = ckpt["rejected_count"]
-    wer_sum = ckpt["wer_sum"]
-    wer_count = ckpt["wer_count"]
+    # In --only-rejected mode, limit work to only the rejected indices.
+    if only_rejected and rejected_indices:
+        work = [t for t in work if t[1] in rejected_indices]
 
     # Filter work list to skip already-validated clips
     pending = [(w, i, e) for w, i, e in work if i not in done]
