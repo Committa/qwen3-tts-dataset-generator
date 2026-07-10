@@ -32,6 +32,8 @@ def _normalize_text(text: str, lang_code: str | None = None) -> str:
         except Exception:
             logger.warning("alpha2digit failed for lang '%s', falling back", lang_code)
 
+    text = text.replace("\u2018", "'").replace("\u2019", "'")
+    text = text.replace("\u201c", '"').replace("\u201d", '"')
     text = unicodedata.normalize("NFKD", text).encode("ASCII", "ignore").decode("ASCII")
     text = text.lower().strip()
     text = re.sub(r"\b(\d+)[.,:;](00)\b", r"\1", text)
