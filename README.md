@@ -19,7 +19,7 @@ Italian, English, Chinese, Japanese, Korean, German, French, Russian, Portuguese
 ## Features
 
 - **Generate** audio from a text corpus via Qwen3-TTS (batch GPU inference with resumable checkpoint)
-- **Validate** each clip with ASR (faster-whisper) + WER, auto-reject low-quality clips
+- **Validate** each clip with ASR (faster-whisper) + WER, auto-reject low-quality clips (with checkpoint/resume)
 - **Verify pronunciation** at the phoneme level (wav2vec2 CTC + espeak-ng PER) to catch clips that pass WER but are mispronounced
 - **Normalize** audio: convert to mono, resample to 22050 Hz, loudness normalize (-23 LUFS), trim silence, save as 16-bit PCM
 - **Manifest** in LJSpeech format (filename|text) with deterministic train/val split
@@ -459,10 +459,11 @@ voice-cloning reference.
 - **1.7B** bf16 → on RTX 4070 (12 GB) fits with `batch_size: 2` (or lower).
   If too tight, try `device_map: "auto"` (CPU offload, slower) or fall back to
   `model_size: "0.6b"`.
-- On OOM: the pipeline saves the checkpoint and prints a clear suggestion.
+- On OOM/Ctrl+C: the pipeline saves both the generate and validate checkpoints
+  and prints a clear suggestion.
 - Full run auto-archives the result in `output/gen{NNN}/`. On a full run, if an
   incomplete generation is detected, you're prompted to resume or start fresh;
-  use `--no-clean` to force a resume, or delete the checkpoint to force a clean.
+  use `--no-clean` to force a resume, or delete the checkpoints to force a clean.
 
 ## Project structure
 
@@ -489,7 +490,9 @@ voice-cloning reference.
 ├── workspace/              # volatile (auto-cleaned on full run)
 │   ├── raw_wav/
 │   ├── accepted_wav/
-│   └── rejected/
+│   ├── rejected/
+│   ├── .generate_checkpoint.json
+│   └── .validate_checkpoint.json
 ├── output/                 # immutable dataset archives
 │   ├── gen001/
 │   │   ├── wavs/
