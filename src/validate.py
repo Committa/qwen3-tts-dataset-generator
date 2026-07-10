@@ -19,26 +19,84 @@ try:
 except ImportError:
     _alpha2digit = None
 
+try:
+    from num2words import num2words as _num2words
+except ImportError:
+    _num2words = None
+
 logger = logging.getLogger(__name__)
+
+PERCENTAGE_PATTERNS: dict[str, str] = {
+    "it": r"per\s+cento",
+    "en": r"per\s+cent\b|percent\b",
+    "fr": r"pour\s+cent",
+    "de": r"\bprozent\b",
+    "es": r"por\s+ciento",
+    "pt": r"por\s+cento",
+    "nl": r"\bprocent\b",
+}
+
+
+def _digits_to_words(text: str, lang_code: str) -> str:
+    """Convert standalone digit tokens to words using num2words.
+
+    This makes the input homogeneous (all words) so that alpha2digit
+    can compose multi-word number expressions on both ref and hyp identically.
+    """
+    if _num2words is None:
+        return text
+
+    def _replace(match):
+        try:
+            return _num2words(int(match.group()), lang=lang_code)
+        except Exception:
+            return match.group()
+
+    return re.sub(r"\b\d+\b", _replace, text)
 
 
 def _normalize_text(text: str, lang_code: str | None = None) -> str:
     """Normalize text for WER comparison: convert number words, strip accents and punctuation."""
     import unicodedata
 
+    # 1. Smart quotes -> ASCII
+    text = text.replace("\u2018", "'").replace("\u2019", "'")
+    text = text.replace("\u201c", '"').replace("\u201d", '"')
+
+    # 2. Percentage expression -> "%" (language-specific)
+    if lang_code is not None:
+        pattern = PERCENTAGE_PATTERNS.get(lang_code)
+        if pattern is not None:
+            text = re.sub(pattern, "%", text, flags=re.IGNORECASE)
+
+    # 3. Pre-clean digit formatting (so num2words can parse clean integers)
+    text = re.sub(r"\b(\d+)[.,:;](00)\b", r"\1", text)
+    text = re.sub(r"(?<=\d)[.,](?=\d)", "", text)
+
+    # 4. Digit tokens -> words (num2words) — makes ref and hyp homogeneous
+    text = _digits_to_words(text, lang_code)
+
+    # 5. alpha2digit on full phrase (words -> digits with full composition)
     if _alpha2digit is not None and lang_code is not None:
         try:
             text = _alpha2digit(text, lang_code, threshold=2)
         except Exception:
             logger.warning("alpha2digit failed for lang '%s', falling back", lang_code)
 
-    text = text.replace("\u2018", "'").replace("\u2019", "'")
-    text = text.replace("\u201c", '"').replace("\u201d", '"')
+    # 6. NFKD + ASCII (strip accents and non-ASCII)
     text = unicodedata.normalize("NFKD", text).encode("ASCII", "ignore").decode("ASCII")
+
+    # 7. Lowercase
     text = text.lower().strip()
+
+    # 8. Final digit formatting cleanup (for alpha2digit's decimal output)
     text = re.sub(r"\b(\d+)[.,:;](00)\b", r"\1", text)
     text = re.sub(r"(?<=\d)[.,](?=\d)", "", text)
+
+    # 9. Punctuation -> space
     text = re.sub(r"[^\w\s]", " ", text)
+
+    # 10. Collapse whitespace
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
