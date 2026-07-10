@@ -65,9 +65,9 @@ repetition_penalty: 1.05      # >1 discourages token loops; 1.05 = author defaul
 asr_model: "large-v3"
 asr_device: "cuda"
 asr_compute_type: "float16"
-asr_workers: 4                # concurrent transcribe() calls (CTranslate2 inter_threads). On GPU the gain is marginal: throughput is CPU/GIL-bound, not GPU-bound. Set 1 if unsure.
+asr_workers: 2                # concurrent transcribe() calls (CTranslate2 inter_threads). On GPU the gain is marginal: throughput is CPU/GIL-bound, not GPU-bound. Set 1 if unsure.
 asr_beam_size: 5              # beam size for ASR decoder (5=author default, 1=greedy). Speeds up the GPU decoder step, but has little effect on overall wav/s when throughput is CPU-bound.
-wer_threshold: 0.15
+wer_threshold: 0.2
 
 ## Pronunciation -------------------------------------------------------------
 # Phoneme-level verification: catches clips that pass WER but whose actual
