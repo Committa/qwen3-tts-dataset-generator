@@ -22,6 +22,7 @@ Usage:
 
 from __future__ import annotations
 
+import enum
 import json
 import logging
 import re
@@ -58,31 +59,32 @@ class _Colors:
     reset = ""
     red = ""
     yellow = ""
+    green = ""
     dim = ""
     bold = ""
 
     @classmethod
     def enable(cls, use_color: bool) -> None:
+        """Populate the color attributes with real escape sequences when on."""
         if use_color:
             cls.reset = "\033[0m"
             cls.red = "\033[31m"
             cls.yellow = "\033[33m"
+            cls.green = "\033[32m"
             cls.dim = "\033[2m"
             cls.bold = "\033[1m"
 
 
 def _wants_color() -> bool:
-    """Return True iff stdout looks like an interactive TTY that handles ANSI."""
+    """Return True iff stdout looks like an interactive TTY that handles ANSI.
+
+    Windows 10+ supports ANSI in the new console; legacy cmd.exe does not. We
+    optimistically enable it; the worst case is a few stray escape sequences,
+    which is preferable to silently stripping useful emphasis.
+    """
     if not hasattr(sys.stdout, "isatty"):
         return False
-    if not sys.stdout.isatty():
-        return False
-    if sys.platform == "win32":
-        # Windows 10+ supports ANSI in the new console; legacy cmd.exe does not.
-        # We optimistically enable it; the worst case is a few stray escape
-        # sequences, which is preferable to silently stripping useful emphasis.
-        return True
-    return True
+    return sys.stdout.isatty()
 
 
 # --------------------------------------------------------------------------- #
@@ -136,14 +138,11 @@ def _getch() -> str:
 class _Player:
     """Tiny non-blocking WAV player around sounddevice.
 
-    Holds the most recently started sounddevice stream so we can stop it on
-    advance. Tolerant of missing audio devices: the play() call logs and
-    returns False instead of raising, so the review loop keeps going on a
-    headless box (e.g. a CI runner).
+    Tolerant of missing audio devices: ``play`` logs and returns False instead
+    of raising, so the review loop keeps going on a headless box (e.g. a CI
+    runner). Playback is stopped via the global ``sd.stop()``; ``sounddevice``
+    does not hand out a per-clip stream handle to close.
     """
-
-    def __init__(self) -> None:
-        self._stream: sd.OutputStream | None = None
 
     def play(self, wav_path: Path) -> bool:
         """Start playback of the WAV file in a background stream.
@@ -162,7 +161,7 @@ class _Player:
             logger.warning("Cannot read %s: %s", wav_path.name, e)
             return False
         try:
-            self._stream = sd.play(data, samplerate=sr, blocking=False)
+            sd.play(data, samplerate=sr, blocking=False)
         except Exception as e:
             logger.warning(
                 "Audio playback failed for %s (%s). "
@@ -170,7 +169,6 @@ class _Player:
                 wav_path.name,
                 e,
             )
-            self._stream = None
             return False
         return True
 
@@ -180,12 +178,6 @@ class _Player:
             sd.stop()
         except Exception:
             pass
-        if self._stream is not None:
-            try:
-                self._stream.close()
-            except Exception:
-                pass
-            self._stream = None
 
 
 # --------------------------------------------------------------------------- #
@@ -284,14 +276,15 @@ def _load_rejected_clips(cfg: common.Config) -> list[RejectedClip]:
     """Read all sidecar JSONs from workspace/rejected/ and parse them.
 
     Skips files with malformed JSON or missing ``index`` fields (logs a
-    warning per skip). Sorts the result by index so the queue is stable
-    regardless of the underlying filesystem order.
+    warning per skip). Sidecars are read in deterministic stem order so the
+    queue is stable across filesystems; the caller owns any further ordering
+    (e.g. by WER or by corpus index).
 
     Args:
         cfg: Pipeline configuration (only ``cfg.paths.rejected`` is used).
 
     Returns:
-        Sorted list of RejectedClip records. May be empty.
+        List of RejectedClip records in sidecar-stem order. May be empty.
     """
     rejected_dir = cfg.paths.rejected
     if not rejected_dir.exists():
@@ -324,7 +317,6 @@ def _load_rejected_clips(cfg: common.Config) -> list[RejectedClip]:
                 threshold=thr,
             )
         )
-    clips.sort(key=lambda c: c.index)
     return clips
 
 
@@ -480,53 +472,6 @@ def _display_clip(clip: RejectedClip, position: int, total: int) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Main loop                                                                    #
-# --------------------------------------------------------------------------- #
-
-
-def _decide_and_apply(
-    cfg: common.Config,
-    clip: RejectedClip,
-    action: str,
-    decisions: dict[str, dict],
-    dry_run: bool,
-) -> None:
-    """Apply a single decision and update the in-memory + on-disk checkpoint.
-
-    ``a`` and ``r`` mutate the filesystem (via ``_accept_clip`` or
-    ``_restore_rejected``). In dry-run mode the mutation is skipped but the
-    decision is still recorded so a subsequent run without --dry-run won't
-    re-prompt.
-
-    Args:
-        cfg: Pipeline configuration.
-        clip: The clip the user just decided on.
-        action: One of ``"accepted"``, ``"rejected"``.
-        decisions: Live decisions dict (mutated in place).
-        dry_run: True to skip filesystem mutations.
-    """
-    idx_key = str(clip.index)
-    prev = decisions.get(idx_key, {}).get("action")
-
-    if action == "accepted":
-        if dry_run:
-            logger.info("[dry-run] would ACCEPT idx=%d", clip.index)
-        else:
-            _accept_clip(cfg, clip)
-    elif action == "rejected":
-        if prev == "accepted" and not dry_run:
-            _restore_rejected(cfg, clip)
-        elif dry_run:
-            logger.info("[dry-run] would REJECT idx=%d", clip.index)
-    else:
-        raise ValueError(f"Unknown action: {action!r}")
-
-    decisions[idx_key] = {"action": action, "reason": clip.reason}
-    if not dry_run:
-        _save_checkpoint(cfg.paths.review_checkpoint, decisions)
-
-
-# --------------------------------------------------------------------------- #
 # Prompt + feedback                                                            #
 # --------------------------------------------------------------------------- #
 
@@ -621,8 +566,147 @@ def _show_feedback(text: str, color: str | None = None) -> None:
     sys.stdout.flush()
 
 
-# Add semantic color aliases to ``_Colors`` without breaking the no-color default.
-_Colors.green = "\033[32m"
+def _print_summary(decisions: dict[str, dict], clips: list[RejectedClip]) -> None:
+    """Print a one-shot tally of decisions made so far."""
+    accepted = sum(1 for v in decisions.values() if v.get("action") == "accepted")
+    rejected = sum(1 for v in decisions.values() if v.get("action") == "rejected")
+    print(
+        f"\n{_Colors.bold}Review summary{_Colors.reset}: "
+        f"accepted={accepted}  rejected={rejected}  total_decided={len(decisions)}  "
+        f"queue={len(clips)}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Decision application                                                         #
+# --------------------------------------------------------------------------- #
+
+
+def _decide_and_apply(
+    cfg: common.Config,
+    clip: RejectedClip,
+    action: str,
+    decisions: dict[str, dict],
+    dry_run: bool,
+) -> None:
+    """Apply a single decision and update the in-memory + on-disk checkpoint.
+
+    ``a`` and ``r`` mutate the filesystem (via ``_accept_clip`` or
+    ``_restore_rejected``). In dry-run mode the mutation is skipped but the
+    decision is still recorded so a subsequent run without --dry-run won't
+    re-prompt.
+
+    Args:
+        cfg: Pipeline configuration.
+        clip: The clip the user just decided on.
+        action: One of ``"accepted"``, ``"rejected"``.
+        decisions: Live decisions dict (mutated in place).
+        dry_run: True to skip filesystem mutations.
+    """
+    idx_key = str(clip.index)
+    prev = decisions.get(idx_key, {}).get("action")
+
+    if action == "accepted":
+        if dry_run:
+            logger.info("[dry-run] would ACCEPT idx=%d", clip.index)
+        else:
+            _accept_clip(cfg, clip)
+    elif action == "rejected":
+        if prev == "accepted" and not dry_run:
+            _restore_rejected(cfg, clip)
+        elif dry_run:
+            logger.info("[dry-run] would REJECT idx=%d", clip.index)
+    else:
+        raise ValueError(f"Unknown action: {action!r}")
+
+    decisions[idx_key] = {"action": action, "reason": clip.reason}
+    if not dry_run:
+        _save_checkpoint(cfg.paths.review_checkpoint, decisions)
+
+
+# --------------------------------------------------------------------------- #
+# Key handler                                                                  #
+# --------------------------------------------------------------------------- #
+
+
+class _Outcome(enum.Enum):
+    """Result of a single keypress in the review loop.
+
+    ADVANCE: user accepted or rejected; move to the next clip.
+    REWIND:  user pressed ``b``; revisit the previous clip.
+    REPLAY:  user pressed ``p`` (or ``b`` at the first clip); re-prompt
+        without advancing.
+    UNKNOWN: user pressed an unmapped key; re-prompt after showing help.
+    QUIT:    user pressed ``q``; exit the loop.
+    """
+
+    ADVANCE = "advance"
+    REWIND = "rewind"
+    REPLAY = "replay"
+    UNKNOWN = "unknown"
+    QUIT = "quit"
+
+
+def _handle_review_key(
+    cfg: common.Config,
+    clip: RejectedClip,
+    decisions: dict[str, dict],
+    dry_run: bool,
+    player: _Player,
+    cursor: int,
+) -> _Outcome:
+    """Read one keypress and apply its side effects; return the loop outcome.
+
+    Filesystem mutations (accept/restore) and feedback printing happen here;
+    the caller is responsible for moving the cursor and re-prompting based
+    on the returned ``_Outcome``.
+
+    Args:
+        cfg: Pipeline configuration.
+        clip: The clip currently on display.
+        decisions: Live decisions dict (mutated in place on ``a`` / ``r``).
+        dry_run: True to skip filesystem mutations.
+        player: Audio player (stopped on ``b`` / ``q``; replayed on ``p``).
+        cursor: Current 0-based position in the clips queue, used only to
+            detect ``b`` at the first clip (a no-op rewind).
+
+    Returns:
+        The ``_Outcome`` the caller should dispatch on.
+    """
+    key = _getch().lower()
+    if key == "a":
+        _decide_and_apply(cfg, clip, "accepted", decisions, dry_run)
+        _show_feedback("accepted", _Colors.green)
+        return _Outcome.ADVANCE
+    if key == "r":
+        _decide_and_apply(cfg, clip, "rejected", decisions, dry_run)
+        _show_feedback("rejected", _Colors.red)
+        return _Outcome.ADVANCE
+    if key == "p":
+        player.play(clip.wav_path)
+        _show_minimal_prompt()
+        return _Outcome.REPLAY
+    if key == "b":
+        if cursor == 0:
+            _show_feedback(
+                "already at the first clip; nothing to go back to",
+                _Colors.dim,
+            )
+            _show_minimal_prompt()
+            return _Outcome.REPLAY
+        player.stop()
+        _show_feedback("rewound one clip", _Colors.dim)
+        return _Outcome.REWIND
+    if key == "q":
+        player.stop()
+        _show_feedback("quit", _Colors.dim)
+        return _Outcome.QUIT
+    if not key:
+        return _Outcome.REPLAY
+    _show_feedback(f"unknown key {key!r}", _Colors.dim)
+    logger.info("%s", _HELP_LINE)
+    _show_prompt()
+    return _Outcome.UNKNOWN
 
 
 # --------------------------------------------------------------------------- #
@@ -683,6 +767,15 @@ def main(
     one of ``a/r/p/b/q`` to act. Decisions (``a`` and ``r``) are written to
     ``workspace/.review_checkpoint.json`` and applied to the filesystem
     immediately, so quitting in the middle never loses progress.
+
+    Two position counters live in the loop:
+
+    - ``cursor``: 0-based index into ``clips``; the clip currently on display.
+    - ``decision_position``: 1-based counter that increments on every
+      ``a`` / ``r`` and decrements on every ``b``. Shown in the per-clip
+      header so the user sees the decision sequence number, which is
+      distinct from the queue position when the checkpoint already held
+      decisions from a previous session.
     """
     cfg = common.load_config(config_path)
     common.ensure_dirs(
@@ -708,8 +801,10 @@ def main(
         clips.sort(key=lambda c: c.index)
 
     decisions = {} if restart else _load_checkpoint(cfg.paths.review_checkpoint)
-    pending_idx = [i for i, c in enumerate(clips) if str(c.index) not in decisions]
-    if not pending_idx:
+    first_pending = next(
+        (i for i, c in enumerate(clips) if str(c.index) not in decisions), None
+    )
+    if first_pending is None:
         logger.info(
             "All %d rejected clips already have a decision in %s. "
             "Use --restart to start over.",
@@ -719,10 +814,10 @@ def main(
         _print_summary(decisions, clips)
         return
 
-    cursor = pending_idx[0]
+    cursor = first_pending
     total = len(clips)
     player = _Player()
-    summary_position = len(decisions) + 1
+    decision_position = len(decisions) + 1
     try:
         while cursor < total:
             clip = clips[cursor]
@@ -733,68 +828,34 @@ def main(
             if clear_screen:
                 _maybe_clear()
             _show_progress(clips, decisions, cursor)
-            _display_clip(clip, summary_position, total)
+            _display_clip(clip, decision_position, total)
             if not note:
                 print(f"  {_Colors.dim}[playing...]{_Colors.reset}")
             player.play(clip.wav_path)
             _show_prompt()
 
             while True:
-                key = _getch().lower()
-                if key == "a":
-                    _decide_and_apply(cfg, clip, "accepted", decisions, dry_run)
-                    summary_position += 1
-                    _show_feedback("accepted", _Colors.green)
+                outcome = _handle_review_key(
+                    cfg, clip, decisions, dry_run, player, cursor
+                )
+                if outcome is _Outcome.ADVANCE:
+                    decision_position += 1
                     break
-                if key == "r":
-                    _decide_and_apply(cfg, clip, "rejected", decisions, dry_run)
-                    summary_position += 1
-                    _show_feedback("rejected", _Colors.red)
-                    break
-                if key == "p":
-                    player.play(clip.wav_path)
-                    _show_minimal_prompt()
-                    continue
-                if key == "b":
-                    if cursor == 0:
-                        _show_feedback(
-                            "already at the first clip; nothing to go back to",
-                            _Colors.dim,
-                        )
-                        _show_minimal_prompt()
-                        continue
+                if outcome is _Outcome.REWIND:
                     cursor -= 1
-                    summary_position = max(1, summary_position - 1)
-                    player.stop()
-                    _show_feedback("rewound one clip", _Colors.dim)
+                    decision_position = max(1, decision_position - 1)
                     break
-                if key == "q":
-                    player.stop()
-                    _show_feedback("quit", _Colors.dim)
+                if outcome is _Outcome.QUIT:
                     _print_summary(decisions, clips)
                     return
-                if not key:
-                    continue
-                _show_feedback(f"unknown key {key!r}", _Colors.dim)
-                logger.info("%s", _HELP_LINE)
-                _show_prompt()
+                # REPLAY and UNKNOWN: the handler already printed the
+                # next prompt/feedback; stay in the inner loop.
             cursor += 1
     except KeyboardInterrupt:
         logger.info("Interrupted; saving current state.")
     finally:
         player.stop()
         _print_summary(decisions, clips)
-
-
-def _print_summary(decisions: dict[str, dict], clips: list[RejectedClip]) -> None:
-    """Print a one-shot tally of decisions made so far."""
-    accepted = sum(1 for v in decisions.values() if v.get("action") == "accepted")
-    rejected = sum(1 for v in decisions.values() if v.get("action") == "rejected")
-    print(
-        f"\n{_Colors.bold}Review summary{_Colors.reset}: "
-        f"accepted={accepted}  rejected={rejected}  total_decided={len(decisions)}  "
-        f"queue={len(clips)}"
-    )
 
 
 if __name__ == "__main__":
