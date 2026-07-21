@@ -93,6 +93,7 @@ phoneme_cleanup_every_n_batches: 10   # free CUDA allocator pool every N batches
 phoneme_threshold: 0.30       # PER reject cutoff; phoneme recognition is noisier than word ASR
 phoneme_word_report: true     # write workspace/.pronunciation_words.csv with per-word PER (diagnostic, both modes)
 phoneme_word_top_n: 20        # number of worst-pronounced words to log and include in report.json
+phoneme_report_min_occurrences: 3    # words must appear at least this many times in the corpus to be listed in the "worst words" report (prevents one-off artefacts from dominating)
 
 ## Normalization ------------------------------------------------------------
 

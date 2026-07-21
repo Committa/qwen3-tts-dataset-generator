@@ -353,6 +353,7 @@ Main parameters:
 | `phoneme_threshold` | `0.30` | PER rejection threshold (tune with `--step pronunciation --calibrate`) |
 | `phoneme_word_report` | `true` | write `workspace/.pronunciation_words.csv` ranking words by mean PER (diagnostic, both modes) |
 | `phoneme_word_top_n` | `20` | number of worst-pronounced words to log and include in `report.json` |
+| `phoneme_report_min_occurrences` | `3` | words must appear at least this many times in the corpus to be listed in the "worst words" report |
 | `target_sample_rate` | `22050` | output sample rate in Hz |
 | `target_lufs` | `-23.0` | loudness normalization target (EBU R128) |
 | `trim_silence_db` | `60` | dB threshold for silence trimming (higher = less aggressive) |

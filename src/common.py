@@ -345,6 +345,11 @@ class Config:
     phoneme_threshold: float = 0.30
     phoneme_word_report: bool = True
     phoneme_word_top_n: int = 20
+    # Minimum number of occurrences for a word to appear in the "worst words"
+    # log and pronunciation report. Words that appear only once in the corpus
+    # usually have a high PER by chance (a single bad TTS render) and are not
+    # useful for deciding which words to remove or reword.
+    phoneme_report_min_occurrences: int = 3
     target_sample_rate: int = 22050
     target_lufs: float = -23.0
     trim_silence_db: float = 60.0
@@ -430,6 +435,9 @@ def load_config(config_path: str | Path | None = None) -> Config:
         raw.get("phoneme_word_report", cfg.phoneme_word_report)
     )
     cfg.phoneme_word_top_n = int(raw.get("phoneme_word_top_n", cfg.phoneme_word_top_n))
+    cfg.phoneme_report_min_occurrences = int(
+        raw.get("phoneme_report_min_occurrences", cfg.phoneme_report_min_occurrences)
+    )
     cfg.target_sample_rate = int(raw.get("target_sample_rate", cfg.target_sample_rate))
     cfg.target_lufs = float(raw.get("target_lufs", cfg.target_lufs))
     cfg.trim_silence_db = float(raw.get("trim_silence_db", cfg.trim_silence_db))

@@ -63,6 +63,9 @@ _REJECTED_LOG_NAME = "pronunciation.log"
 # Filename of the per-word PER CSV report written under workspace/.
 _WORD_REPORT_NAME = ".pronunciation_words.csv"
 
+# Filename of the human-readable pronunciation report written under workspace/.
+_PRONUNCIATION_REPORT_NAME = ".pronunciation_report.txt"
+
 # Sentinel inserted by espeak-ng between words in the phoneme output so word
 # boundaries survive tokenization. The ASCII unit separator (\x1f) is a control
 # character that never appears in IPA phoneme strings.
@@ -831,17 +834,36 @@ def _write_word_report(word_rows: list[dict[str, Any]], cfg: common.Config) -> N
     )
 
 
-def _log_worst_words(word_rows: list[dict[str, Any]], top_n: int) -> None:
-    """Log the top-N worst-pronounced words.
+def _log_worst_words(
+    word_rows: list[dict[str, Any]],
+    top_n: int,
+    min_occurrences: int,
+) -> None:
+    """Log the top-N worst-pronounced words with at least *min_occurrences*.
+
+    Words that appear only once (``occ=1``) often have a high PER by chance
+    (a single bad TTS render) and are excluded to keep the log actionable.
 
     Args:
         word_rows: Ranked rows from :func:`_aggregate_word_stats`.
-        top_n: Number of words to log.
+        top_n: Maximum number of words to log.
+        min_occurrences: Minimum occurrences to qualify.
     """
     if not word_rows:
         return
-    logger.info("Worst-pronounced words (top %d by mean PER):", top_n)
-    for r in word_rows[:top_n]:
+    filtered = [r for r in word_rows if r["occurrences"] >= min_occurrences]
+    if not filtered:
+        logger.info(
+            "No words with >=%d occurrences found; skipping per-word log.",
+            min_occurrences,
+        )
+        return
+    logger.info(
+        "Worst-pronounced words (top %d by mean PER, occ >= %d):",
+        min(top_n, len(filtered)),
+        min_occurrences,
+    )
+    for r in filtered[:top_n]:
         logger.info(
             "  %-20s occ=%d mean=%.3f min=%.3f max=%.3f median=%.3f",
             r["word"],
@@ -851,6 +873,133 @@ def _log_worst_words(word_rows: list[dict[str, Any]], top_n: int) -> None:
             r["max_per"],
             r["median_per"],
         )
+
+
+def _write_pronunciation_report(
+    cfg: common.Config,
+    calibration: dict[str, Any] | None,
+    word_rows: list[dict[str, Any]],
+    top_n: int,
+    min_occurrences: int,
+) -> None:
+    """Write a human-readable pronunciation report to ``workspace/``.
+
+    The report contains the PER calibration distribution (if available), a
+    summary of the per-word stats, and the top-N worst-pronounced words
+    filtered by minimum occurrences (systemic issues, not one-off artefacts).
+
+    Args:
+        cfg: Pipeline configuration.
+        calibration: Calibration summary dict from :func:`_calibration_summary`,
+            or ``None`` (normal mode — distribution is not evaluated).
+        word_rows: Ranked rows from :func:`_aggregate_word_stats`.
+        top_n: Maximum number of worst-pronounced words to list.
+        min_occurrences: Minimum occurrences for a word to be listed.
+    """
+    out_path = cfg.paths.report.parent / _PRONUNCIATION_REPORT_NAME
+    lines: list[str] = []
+
+    lines.append("=" * 70)
+    lines.append("PRONUNCIATION REPORT")
+    lines.append("=" * 70)
+
+    # --- Calibration / quality section ---
+    if calibration:
+        lines.append("")
+        lines.append("Calibration distribution (PER across all checked clips)")
+        lines.append("-" * 70)
+        lines.append(f"  Clips checked         : {calibration.get('count', 0)}")
+        lines.append(
+            f"  min / p25 / median    : {calibration.get('min', 0):.3f} / "
+            f"{calibration.get('p25', 0):.3f} / {calibration.get('median', 0):.3f}"
+        )
+        lines.append(
+            f"  p75 / p90 / max       : {calibration.get('p75', 0):.3f} / "
+            f"{calibration.get('p90', 0):.3f} / {calibration.get('max', 0):.3f}"
+        )
+        lines.append(f"  mean                  : {calibration.get('mean', 0):.3f}")
+        lines.append(f"  Current threshold     : {calibration.get('threshold', 0):.3f}")
+
+    # --- Word summary ---
+    if not word_rows:
+        lines.append("")
+        lines.append("No per-word data available.")
+        out_path.write_text("\n".join(lines), encoding="utf-8")
+        logger.info("Pronunciation report written to %s", out_path)
+        return
+
+    total_unique = len(word_rows)
+    perfect = sum(1 for r in word_rows if r["mean_per"] == 0.0)
+    systemic = [
+        r
+        for r in word_rows
+        if r["occurrences"] >= min_occurrences and r["mean_per"] > 0.0
+    ]
+    one_off = [r for r in word_rows if r["occurrences"] == 1]
+
+    lines.append("")
+    lines.append("Word Summary")
+    lines.append("-" * 70)
+    lines.append(f"  Unique words analyzed                 : {total_unique}")
+    lines.append(f"  Perfectly pronounced (mean_per=0.00)  : {perfect}")
+    lines.append(f"  Evaluable words (occ >= {min_occurrences})   : {len(systemic)}")
+    lines.append(f"  One-off words (occ=1, excluded)        : {len(one_off)}")
+
+    # --- Systemic issues (filtered top-N) ---
+    if systemic:
+        n_show = min(top_n, len(systemic))
+        lines.append("")
+        lines.append(
+            f"Systemic Issues — "
+            f"words appearing at least {min_occurrences} times, ranked by mean PER"
+        )
+        lines.append("  (These are candidates for removal or rewording in the corpus.)")
+        lines.append("-" * 70)
+        lines.append(
+            f"  {'word':<24s} {'occ':>4s} {'mean':>7s} {'min':>7s} {'max':>7s} "
+            f"{'median':>7s}"
+        )
+        lines.append(f"  {'-' * 24} {'-' * 4} {'-' * 7} {'-' * 7} {'-' * 7} {'-' * 7}")
+        for r in systemic[:n_show]:
+            lines.append(
+                f"  {r['word']:<24s} "
+                f"{r['occurrences']:>4d} "
+                f"{r['mean_per']:>7.3f} "
+                f"{r['min_per']:>7.3f} "
+                f"{r['max_per']:>7.3f} "
+                f"{r['median_per']:>7.3f}"
+            )
+    else:
+        lines.append("")
+        lines.append(
+            f"No words with {min_occurrences}+ occurrences. "
+            "Corpus may be too small for systemic diagnosis."
+        )
+
+    # --- Top one-off artefacts (curiosity, 5 worst) ---
+    if one_off:
+        one_off_sorted = sorted(one_off, key=lambda r: r["mean_per"], reverse=True)
+        n_one = min(5, len(one_off_sorted))
+        lines.append("")
+        lines.append(
+            "Top one-off artefacts (occ=1, worst by PER — "
+            "single bad TTS renders, not word problems)"
+        )
+        lines.append("-" * 70)
+        lines.append(f"  {'word':<24s} {'occ':>4s} {'mean':>7s}")
+        lines.append(f"  {'-' * 24} {'-' * 4} {'-' * 7}")
+        for r in one_off_sorted[:n_one]:
+            lines.append(
+                f"  {r['word']:<24s} "
+                f"{r['occurrences']:>4d} "
+                f"{r['mean_per']:>7.3f}"
+            )
+
+    lines.append("")
+    lines.append("=" * 70)
+
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+    logger.info("Pronunciation report written to %s", out_path)
 
 
 def run_pronunciation(cfg: common.Config, calibrate: bool = False) -> dict[str, Any]:
@@ -950,7 +1099,19 @@ def run_pronunciation(cfg: common.Config, calibrate: bool = False) -> dict[str, 
             per_clip_word_scores.append(_align_words(ref_words, hyp_tokens))
         word_rows = _aggregate_word_stats(per_clip_word_scores)
         _write_word_report(word_rows, cfg)
-        _log_worst_words(word_rows, cfg.phoneme_word_top_n)
-        result["worst_words"] = word_rows[: cfg.phoneme_word_top_n]
+        min_occ = max(1, cfg.phoneme_report_min_occurrences)
+        _log_worst_words(word_rows, cfg.phoneme_word_top_n, min_occ)
+        _write_pronunciation_report(
+            cfg,
+            result.get("calibration"),
+            word_rows,
+            cfg.phoneme_word_top_n,
+            min_occ,
+        )
+        # Store only the filtered worst-words list so pipeline report (JSON) is also clean.
+        filtered_worst = [
+            r for r in word_rows if r["occurrences"] >= min_occ and r["mean_per"] > 0.0
+        ][: cfg.phoneme_word_top_n]
+        result["worst_words"] = filtered_worst
 
     return result
