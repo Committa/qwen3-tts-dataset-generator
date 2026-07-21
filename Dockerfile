@@ -10,7 +10,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3.12 python3.12-venv python3-pip curl ca-certificates git \
-        sox ffmpeg libsndfile1 \
+        sox ffmpeg libsndfile1 libportaudio2 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -sSL https://install.python-poetry.org | python3.12 - --version 1.8.4 \

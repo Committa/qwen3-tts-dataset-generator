@@ -148,14 +148,67 @@ When validation rejects clips, inspect and retry:
 5. Publish the final dataset
 
 ```bash
-# Option A: TTS was wrong — regenerate the rejected clips
+# Option A (fast): regenerate and re-validate only the rejected clips
 poetry run gen-dataset --step generate --only-rejected
-poetry run gen-dataset --from validate      # validate + pronunciation + normalize + publish
+poetry run gen-dataset --step validate --only-rejected
+poetry run gen-dataset --from pronunciation   # pronunciation + normalize + publish
 
-# Option B: ASR/PER was wrong — accept manually
+# Option B (full): regenerate rejected, but re-validate everything
+poetry run gen-dataset --step generate --only-rejected
+poetry run gen-dataset --from validate              # validate + pronunciation + normalize + publish
+
+# Option C: ASR/PER was wrong — accept manually
 poetry run gen-dataset --accept 7,13
 poetry run gen-dataset --from normalize
 ```
+
+The difference between A and B: A skips re-validating already-accepted clips (much faster on the second iteration when most clips have already been validated). B re-runs ASR on everything, which is slower but can catch systematic errors (e.g. if the format or clipping changed after regeneration).
+
+### Review rejected clips interactively
+
+`--accept 7,13` is fine for a handful of indices, but on a batch of dozens or
+hundreds of false positives the loop is faster than reading back the JSONs by
+hand. `review-rejected` walks every clip in `workspace/rejected/`, plays the
+audio, and lets you decide with a single keypress:
+
+```bash
+poetry run review-rejected
+```
+
+```
+─── 43/198 · 42 decided (30a + 12r) · 156 to go ───
+[042/198]  idx=000294  wer=0.222 (thr 0.200)  dur=4.0s
+expected   : I bambini mi hanno invitata a cenare con loro.
+transcribed: Ita Naka mi hanno invitata a cenare con loro.
+[playing...]
+[a]ccept  [r]eject  [p]lay  [b]ack  [q]uit
+> a
+  -> accepted
+```
+
+Keys: `a` accept (moves the clip to `accepted_wav/`, persists decision), `r`
+reject (keeps the clip in `rejected/`, persists decision), `p` play again,
+`b` back (rewind one clip — the previous decision, if any, stands),
+`q` quit with summary.
+
+Decisions are applied immediately (`a` and `r` call `common.accept_clips` in
+real time), so a `q` in the middle never loses progress. State is stored in
+`workspace/.review_checkpoint.json`; clips you've already decided on do not
+reappear in the next run. Use `--restart` to ignore the checkpoint and start
+over, `--sort index` to walk the corpus in natural order instead of the
+default WER-ascending ("easy wins" first), and `--dry-run` to preview the
+queue without touching the filesystem.
+
+By default the terminal is cleared before each clip so the previous one does
+not scroll into view (focus mode). Use `--no-clear` to keep the scrollback of
+recent decisions. Replaying a clip with `p` only re-prints the `> ` prompt
+without the legend, to avoid visual spam on repeated replays. A one-line
+progress banner (`N/M · X decided (Aa + Br) · K to go`) is shown at the top
+of every clip so you can see at a glance how far the triage has progressed
+across sessions.
+
+On Linux hosts (not Docker) install the PortAudio runtime first:
+`sudo apt-get install libportaudio2`. The Docker image already has it.
 
 ## Pronunciation verification (phoneme-level)
 

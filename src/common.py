@@ -271,6 +271,9 @@ class Paths:
     validate_checkpoint: Path = field(
         default_factory=lambda: _resolve_path("workspace/.validate_checkpoint.json")
     )
+    review_checkpoint: Path = field(
+        default_factory=lambda: _resolve_path("workspace/.review_checkpoint.json")
+    )
     log_file: Path = field(default_factory=lambda: _resolve_path("logs/pipeline.log"))
     prompt_cache: Path = field(
         default_factory=lambda: _resolve_path("workspace/.voice_cache")
@@ -659,6 +662,7 @@ def clean_working_dirs(cfg: Config) -> None:
         cfg.paths.report,
         cfg.paths.checkpoint,
         cfg.paths.validate_checkpoint,
+        cfg.paths.review_checkpoint,
     ]:
         if f.exists():
             f.unlink()

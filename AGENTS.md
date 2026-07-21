@@ -19,6 +19,9 @@ poetry run gen-dataset --accept 7,13                  # manually accept rejected
 poetry run test-gen-dataset          # speaker test (batched by batch_size)
 poetry run test-gen-dataset --model-type base  # override model_type for the test
 poetry run test-gen-dataset --batch-size 8     # override batch_size for the test
+poetry run review-rejected          # interactive triage of rejected clips (a/r/p/b/q)
+poetry run review-rejected --restart  # ignore review checkpoint, start from the first clip
+poetry run review-rejected --no-clear  # keep scrollback instead of clearing before each clip
 poetry run gen-dataset --help        # CLI help
 poetry run black src                 # format
 poetry run isort src                 # sort imports (black profile)
