@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -168,6 +170,69 @@ def _percentile(sorted_values: list[float], pct: float) -> float:
     return sorted_values[k]
 
 
+def _maybe_set_espeak_library() -> None:
+    """On Windows, auto-detect the espeak-ng shared library from common locations.
+
+    The ``phonemizer`` library relies on ``ctypes.util.find_library`` to locate
+    the espeak-ng shared library. On Windows that function does **not** search
+    ``PATH`` — it only looks in standard DLL directories (``System32``, the
+    Python directory, etc.). Users who installed espeak-ng in ``Program Files``
+    (via the MSI installer) will have ``espeak-ng.exe`` on ``PATH`` (or not) but
+    the DLL will not be found by ``ctypes.util.find_library`` either way.
+
+    This function works around the issue by searching in:
+
+    1. The directory of the espeak-ng executable found via ``shutil.which``
+       (works when the ``eSpeak NG`` directory is on ``PATH``).
+    2. Common Windows install paths:
+
+       - ``%ProgramFiles%/eSpeak NG/``
+       - ``%ProgramFiles(x86)%/eSpeak NG/``
+
+    If a candidate DLL is found, ``EspeakWrapper.set_library()`` is called so
+    phonemizer can load it directly without relying on ``ctypes.util``.
+
+    Has no effect on Linux / macOS (``sys.platform != 'win32'``) and respects
+    an explicitly set ``PHONEMIZER_ESPEAK_LIBRARY`` environment variable, which
+    takes precedence.
+    """
+    if sys.platform != "win32":
+        return
+
+    from phonemizer.backend.espeak.wrapper import EspeakWrapper
+
+    # Already set programmatically or via env var — skip.
+    if EspeakWrapper._ESPEAK_LIBRARY is not None:
+        return
+    if "PHONEMIZER_ESPEAK_LIBRARY" in os.environ:
+        return
+
+    dll_candidates: list[Path] = []
+
+    # Step 1 — executable directory (works when on PATH).
+    exe = shutil.which("espeak-ng") or shutil.which("espeak")
+    if exe:
+        dll_candidates.append(Path(exe).parent)
+
+    # Step 2 — common Windows install paths.
+    for base_var in ("ProgramFiles", "ProgramFiles(x86)"):
+        base = os.environ.get(base_var)
+        if base:
+            candidate = Path(base) / "eSpeak NG"
+            if candidate.is_dir():
+                dll_candidates.append(candidate)
+
+    dll_names = ("espeak-ng.dll", "libespeak-ng.dll", "libespeak-ng.so.1")
+    for dll_dir in dll_candidates:
+        for name in dll_names:
+            dll = dll_dir / name
+            if dll.exists():
+                resolved = str(dll.resolve())
+                logger.info("Auto-detected espeak-ng DLL on Windows: %s", resolved)
+                EspeakWrapper.set_library(resolved)
+                return
+
+
 def _make_espeak_backend(lang_code: str) -> Any:
     """Construct the espeak-ng backend used for reference phonemization.
 
@@ -185,6 +250,8 @@ def _make_espeak_backend(lang_code: str) -> Any:
         RuntimeError: If the espeak-ng binary is not found, with the actionable
             ``ESPEAK_HINT`` appended to the message.
     """
+    _maybe_set_espeak_library()
+
     from phonemizer.backend import EspeakBackend
 
     try:
