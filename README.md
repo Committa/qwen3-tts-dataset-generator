@@ -349,6 +349,7 @@ Main parameters:
 | `phoneme_model` | `facebook/wav2vec2-xlsr-53-espeak-cv-ft` | wav2vec2 CTC model used for phoneme recognition |
 | `phoneme_device` | `cuda` | `cuda` or `cpu` (falls back to CPU if CUDA unavailable) |
 | `phoneme_batch_size` | `8` | wav2vec2 CTC batched inference (not thread-safe; uses batching, not workers) |
+| `phoneme_cleanup_every_n_batches` | `10` | free the PyTorch CUDA allocator pool every N batches (without this, reserved VRAM grows monotonically across hundreds of short forwards until OOM) |
 | `phoneme_threshold` | `0.30` | PER rejection threshold (tune with `--step pronunciation --calibrate`) |
 | `phoneme_word_report` | `true` | write `workspace/.pronunciation_words.csv` ranking words by mean PER (diagnostic, both modes) |
 | `phoneme_word_top_n` | `20` | number of worst-pronounced words to log and include in `report.json` |

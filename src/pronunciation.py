@@ -125,8 +125,19 @@ def _normalize_phonemes(s: str) -> str:
 def _per(reference: str, hypothesis: str) -> float:
     """Phoneme Error Rate between two normalized phoneme strings.
 
-    Reuses ``jiwer.wer`` on whitespace-tokenized phoneme sequences: WER on a
-    token list is exactly the Levenshtein-based PER.
+    Computes the Levenshtein edit distance between the whitespace-tokenized
+    phoneme sequences and divides it by the number of reference tokens. PER is
+    in [0.0, +inf) and matches what ``jiwer.wer`` returns for a single sentence
+    on tokenized input.
+
+    A direct Levenshtein implementation is used (rather than ``jiwer.wer``)
+    because the latter interprets a list input as a list of *sentences* and
+    applies sentence-level transforms (``RemoveMultipleSpaces``, ``Strip``,
+    ``ReduceToListOfListOfWords``); jiwer 4.x raises
+    ``ValueError("...sentences, their lengths must match")`` whenever ref and
+    hyp token lists differ in length, which is the normal case for PER
+    (insertions/deletions are exactly what edit distance is supposed to score).
+    Levenshtein directly mirrors that contract without the indirection.
 
     Args:
         reference: Normalized reference phoneme string.
@@ -136,13 +147,27 @@ def _per(reference: str, hypothesis: str) -> float:
         PER in [0.0, +inf). Returns 1.0 when the reference is empty but the
         hypothesis is not, and 0.0 when both are empty.
     """
-    from jiwer import wer as _jiwer_wer
-
     ref_toks = reference.split()
     hyp_toks = hypothesis.split()
     if not ref_toks:
         return 1.0 if hyp_toks else 0.0
-    return float(_jiwer_wer(ref_toks, hyp_toks))
+    n, m = len(ref_toks), len(hyp_toks)
+    # dp[i][j] = edit distance between ref_toks[:i] and hyp_toks[:j].
+    dp = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(n + 1):
+        dp[i][0] = i
+    for j in range(m + 1):
+        dp[0][j] = j
+    for i in range(1, n + 1):
+        ri = ref_toks[i - 1]
+        for j in range(1, m + 1):
+            cost = 0 if ri == hyp_toks[j - 1] else 1
+            dp[i][j] = min(
+                dp[i - 1][j] + 1,
+                dp[i][j - 1] + 1,
+                dp[i - 1][j - 1] + cost,
+            )
+    return dp[n][m] / n
 
 
 def _percentile(sorted_values: list[float], pct: float) -> float:
@@ -455,6 +480,16 @@ class _PhonemeRecognizer:
         self._model.eval()
         self._device = device
         self._batch_size = max(1, cfg.phoneme_batch_size)
+        # Cadence at which the PyTorch CUDA allocator pool is released back to
+        # the driver via common.cleanup_gpu(). The caching allocator never
+        # returns memory on its own, so without this the reserved pool grows
+        # monotonically across hundreds of short wav2vec2 forwards until OOM.
+        # Fall back to a safe default of 10 if the config value is non-positive.
+        self._cleanup_every = max(1, cfg.phoneme_cleanup_every_n_batches)
+        logger.info(
+            "Phoneme recognizer cleanup cadence: every %d batches",
+            self._cleanup_every,
+        )
 
     def recognize(self, clips: list[_Clip]) -> dict[int, str]:
         """Recognize each clip to normalized IPA phonemes (batched, 16 kHz mono).
@@ -477,6 +512,7 @@ class _PhonemeRecognizer:
         progress = tqdm(
             total=len(clips), desc="pronunciation", unit="wav", dynamic_ncols=True
         )
+        batch_num = 0
         try:
             for i in range(0, len(clips), self._batch_size):
                 chunk = clips[i : i + self._batch_size]
@@ -488,6 +524,9 @@ class _PhonemeRecognizer:
                 for c, ph in zip(chunk, decoded):
                     hyp[c.idx] = _normalize_phonemes(ph or "")
                 progress.update(len(chunk))
+                batch_num += 1
+                if batch_num % self._cleanup_every == 0:
+                    common.cleanup_gpu(log=logger)
         except KeyboardInterrupt:
             logger.warning("Interrupted by user.")
             progress.close()

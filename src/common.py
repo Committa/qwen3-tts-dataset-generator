@@ -334,6 +334,14 @@ class Config:
     phoneme_model: str = "facebook/wav2vec2-xlsr-53-espeak-cv-ft"
     phoneme_device: str = "cuda"
     phoneme_batch_size: int = 8
+    # Cadence (in batches) at which the wav2vec2 recognize loop frees the
+    # PyTorch CUDA allocator pool. Unlike TTS generation (which holds a single
+    # huge model for the whole run), the wav2vec2 forward is short and runs many
+    # times over hundreds of clips; the caching allocator never returns memory
+    # to the driver without empty_cache(), so reserved VRAM grows monotonically
+    # until OOM. 10 batches (~80 clips at batch_size=8) is a good balance between
+    # the overhead of empty_cache() (~100-500 ms) and keeping the pool bounded.
+    phoneme_cleanup_every_n_batches: int = 10
     phoneme_threshold: float = 0.30
     phoneme_word_report: bool = True
     phoneme_word_top_n: int = 20
@@ -414,6 +422,9 @@ def load_config(config_path: str | Path | None = None) -> Config:
     cfg.phoneme_model = raw.get("phoneme_model", cfg.phoneme_model)
     cfg.phoneme_device = raw.get("phoneme_device", cfg.phoneme_device)
     cfg.phoneme_batch_size = int(raw.get("phoneme_batch_size", cfg.phoneme_batch_size))
+    cfg.phoneme_cleanup_every_n_batches = int(
+        raw.get("phoneme_cleanup_every_n_batches", cfg.phoneme_cleanup_every_n_batches)
+    )
     cfg.phoneme_threshold = float(raw.get("phoneme_threshold", cfg.phoneme_threshold))
     cfg.phoneme_word_report = bool(
         raw.get("phoneme_word_report", cfg.phoneme_word_report)

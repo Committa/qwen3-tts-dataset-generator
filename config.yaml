@@ -67,7 +67,7 @@ asr_device: "cuda"
 asr_compute_type: "float16"
 asr_workers: 2                # concurrent transcribe() calls (CTranslate2 inter_threads). On GPU the gain is marginal: throughput is CPU/GIL-bound, not GPU-bound. Set 1 if unsure.
 asr_beam_size: 5              # beam size for ASR decoder (5=author default, 1=greedy). Speeds up the GPU decoder step, but has little effect on overall wav/s when throughput is CPU-bound.
-wer_threshold: 0.2
+wer_threshold: 0.25
 
 ## Pronunciation -------------------------------------------------------------
 # Phoneme-level verification: catches clips that pass WER but whose actual
@@ -89,6 +89,7 @@ phoneme_check: true
 phoneme_model: "facebook/wav2vec2-xlsr-53-espeak-cv-ft"
 phoneme_device: "cuda"
 phoneme_batch_size: 8         # wav2vec2 CTC batched inference (not thread-safe; uses batching, not workers)
+phoneme_cleanup_every_n_batches: 10   # free CUDA allocator pool every N batches (wav2vec2 forward is short; pool grows monotonically without this)
 phoneme_threshold: 0.30       # PER reject cutoff; phoneme recognition is noisier than word ASR
 phoneme_word_report: true     # write workspace/.pronunciation_words.csv with per-word PER (diagnostic, both modes)
 phoneme_word_top_n: 20        # number of worst-pronounced words to log and include in report.json
