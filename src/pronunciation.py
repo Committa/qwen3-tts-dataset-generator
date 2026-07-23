@@ -1002,7 +1002,11 @@ def _write_pronunciation_report(
     logger.info("Pronunciation report written to %s", out_path)
 
 
-def run_pronunciation(cfg: common.Config, calibrate: bool = False) -> dict[str, Any]:
+def run_pronunciation(
+    cfg: common.Config,
+    calibrate: bool = False,
+    only_rejected: bool = False,
+) -> dict[str, Any]:
     """Run phoneme-level pronunciation verification on accepted clips.
 
     For each clip in ``accepted_wav/`` (the WER survivors from ``validate``),
@@ -1014,10 +1018,23 @@ def run_pronunciation(cfg: common.Config, calibrate: bool = False) -> dict[str, 
     In calibrate mode no clips are moved: the PER distribution is logged and
     returned so the user can pick a threshold before committing.
 
+    The pronunciation checkpoint (``cfg.paths.pronunciation_checkpoint``)
+    records indices that have been accepted (PER <= threshold) by a previous
+    non-calibrate run. When ``only_rejected=True``, only clips whose index is
+    NOT in the checkpoint are processed, enabling the standard
+    ``generate --only-rejected`` -> ``validate --only-rejected`` ->
+    ``pronunciation --only-rejected`` regeneration cycle without re-scoring
+    clips that already passed. The checkpoint is updated incrementally as
+    clips are accepted, mirroring the write-on-accept pattern of generate's
+    checkpoint (so a crash mid-run loses at most the current batch).
+
     Args:
         cfg: Pipeline configuration.
         calibrate: If True, measure-only mode (no rejections); prints and
-            returns the PER distribution.
+            returns the PER distribution. The checkpoint is NOT updated in
+            calibrate mode.
+        only_rejected: If True, skip clips already in the pronunciation
+            checkpoint (process only newly-added clips in ``accepted_wav/``).
 
     Returns:
         A dict with ``checked``, ``phoneme_rejected``, ``mean_per``,
@@ -1035,6 +1052,19 @@ def run_pronunciation(cfg: common.Config, calibrate: bool = False) -> dict[str, 
     )
 
     clips = _build_clips(cfg)
+
+    # --- --only-rejected filter: skip clips already accepted by a previous run ---
+    accepted_checkpoint: set[int] = set()
+    if only_rejected:
+        accepted_checkpoint = common.read_checkpoint(cfg.paths.pronunciation_checkpoint)
+        before = len(clips)
+        clips = [c for c in clips if c.idx not in accepted_checkpoint]
+        logger.info(
+            "--only-rejected: %d already accepted (skipped), %d to process",
+            before - len(clips),
+            len(clips),
+        )
+
     if not clips:
         logger.warning(
             "No clips to check in %s. Run the validate step first.",
@@ -1088,6 +1118,25 @@ def run_pronunciation(cfg: common.Config, calibrate: bool = False) -> dict[str, 
             len(results),
             len(records),
             mean_per,
+        )
+        # --- Persist pronunciation checkpoint: accepted indices ---
+        # Two modes:
+        # - only_rejected=True: merge newly-accepted with the pre-existing
+        #   checkpoint (we only re-scored previously-rejected clips, so the
+        #   already-accepted ones stay accepted).
+        # - only_rejected=False: replace the checkpoint with the freshly-
+        #   computed accepted set (we re-scored every clip, so a threshold
+        #   change can drop previously-accepted clips correctly).
+        newly_accepted = {r.clip.idx for r in results if r.accepted}
+        if only_rejected:
+            final_accepted = accepted_checkpoint | newly_accepted
+        else:
+            final_accepted = newly_accepted
+        common.write_checkpoint(cfg.paths.pronunciation_checkpoint, final_accepted)
+        logger.info(
+            "Pronunciation checkpoint updated: %d total accepted (%d newly this run)",
+            len(final_accepted),
+            len(newly_accepted),
         )
 
     # --- Per-word PER report (diagnostic, both modes) ---

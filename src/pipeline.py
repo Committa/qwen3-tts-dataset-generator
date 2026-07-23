@@ -122,7 +122,7 @@ def _maybe_clean_workspace(cfg: common.Config, do_clean: bool, no_clean: bool) -
     "--only-rejected",
     is_flag=True,
     default=False,
-    help="With --step generate or --step validate: operate only on previously rejected clips.",
+    help="With --step generate/validate/pronunciation: operate only on previously rejected clips.",
 )
 @click.option(
     "--calibrate",
@@ -193,10 +193,12 @@ def main(
         do_clean = False
 
     # --- Validate flags ---
-    if only_rejected and {"generate", "validate"}.isdisjoint(steps_to_run):
+    if only_rejected and {"generate", "validate", "pronunciation"}.isdisjoint(
+        steps_to_run
+    ):
         raise click.UsageError(
-            "--only-rejected can only be used with --step generate/validate "
-            "or --from generate/validate."
+            "--only-rejected can only be used with --step generate/validate/"
+            "pronunciation or --from generate/validate."
         )
     if calibrate and step != "pronunciation":
         raise click.UsageError(
@@ -247,7 +249,11 @@ def main(
             elif s == "validate":
                 val_stats = val_mod.run_validate(cfg, only_rejected=only_rejected)
             elif s == "pronunciation":
-                pron_stats = pron_mod.run_pronunciation(cfg, calibrate=calibrate)
+                pron_stats = pron_mod.run_pronunciation(
+                    cfg,
+                    calibrate=calibrate,
+                    only_rejected=only_rejected,
+                )
             elif s == "normalize":
                 norm_stats = norm_mod.run_normalize(cfg)
             elif s == "publish":

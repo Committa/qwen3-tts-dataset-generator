@@ -368,6 +368,12 @@ def _accept_clip(cfg: common.Config, clip: RejectedClip) -> None:
     layout matches what ``normalize`` and ``build_manifest`` expect, but
     operates on a single clip without re-loading config or iterating.
 
+    For pronunciation-step rejections (sidecar carries ``ref_phonemes`` /
+    ``hyp_phonemes``), the clip's index is added to the pronunciation
+    checkpoint so a subsequent ``--step pronunciation --only-rejected`` does
+    not re-score it. Validate-step rejects are not tracked there because
+    validate already manages its own checkpoint.
+
     Args:
         cfg: Pipeline configuration.
         clip: The rejected clip to accept.
@@ -386,6 +392,15 @@ def _accept_clip(cfg: common.Config, clip: RejectedClip) -> None:
     for p in (clip.sidecar_path, clip.wav_path):
         if p.exists():
             p.unlink()
+    # Sync pronunciation checkpoint: a manually-accepted pronunciation-reject
+    # should not be re-scored on the next --only-rejected pass.
+    if clip.ref_phonemes or clip.hyp_phonemes:
+        accepted = common.read_checkpoint(cfg.paths.pronunciation_checkpoint)
+        accepted.add(clip.index)
+        common.write_checkpoint(cfg.paths.pronunciation_checkpoint, accepted)
+        logger.info(
+            "Pronunciation checkpoint updated (manual accept): idx=%d", clip.index
+        )
     logger.info("ACCEPT idx=%d -> %s", clip.index, src.name)
 
 
@@ -420,6 +435,15 @@ def _restore_rejected(cfg: common.Config, clip: RejectedClip) -> None:
     clip.sidecar_path.write_text(
         json.dumps(sidecar, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    # Undo the pronunciation-checkpoint add from the prior _accept_clip call,
+    # so the clip will be re-scored on the next --only-rejected pass.
+    if clip.ref_phonemes or clip.hyp_phonemes:
+        accepted = common.read_checkpoint(cfg.paths.pronunciation_checkpoint)
+        accepted.discard(clip.index)
+        common.write_checkpoint(cfg.paths.pronunciation_checkpoint, accepted)
+        logger.info(
+            "Pronunciation checkpoint updated (re-rejected): idx=%d", clip.index
+        )
     logger.info("RESTORE-REJECTED idx=%d -> %s", clip.index, rejected_wav.name)
 
 
