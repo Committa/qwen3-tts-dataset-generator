@@ -370,10 +370,19 @@ def run_generate(cfg: common.Config, only_rejected: bool = False) -> dict[str, A
             }
         done -= rejected_idx
         common.write_checkpoint(cfg.paths.checkpoint, done)
+        rejected_dir = cfg.paths.rejected
         for idx in rejected_idx:
-            old_wav = cfg.paths.raw_wav / f"{idx:06d}.wav"
-            if old_wav.exists():
-                old_wav.unlink()
+            # Wav in raw_wav/ is the old source we generated from — drop it
+            # so the new generation produces a fresh file (not overwriting).
+            old_raw_wav = cfg.paths.raw_wav / f"{idx:06d}.wav"
+            if old_raw_wav.exists():
+                old_raw_wav.unlink()
+            # Wav in rejected/ is the rejected version we're about to
+            # regenerate — drop it too. The sidecar JSON stays so
+            # pronunciation --only-rejected still sees the queue.
+            old_rejected_wav = rejected_dir / f"{idx:06d}.wav"
+            if old_rejected_wav.exists():
+                old_rejected_wav.unlink()
         pending_idx = sorted(rejected_idx)
         logger.info("Only-rejected mode: %d clips to regenerate", len(pending_idx))
     else:
