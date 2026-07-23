@@ -370,6 +370,18 @@ def run_generate(cfg: common.Config, only_rejected: bool = False) -> dict[str, A
             }
         done -= rejected_idx
         common.write_checkpoint(cfg.paths.checkpoint, done)
+        # Invalidate the pronunciation checkpoint for the regenerated indices:
+        # the new audio has not been pronunciation-checked yet, and the old
+        # PER score no longer applies to the new wav. The next normal
+        # `pronunciation` run (resumability: accepted_wav/ - done) will pick
+        # them up automatically. This is the P2 design: generate --only-rejected
+        # removes the regenerated indices from pronunciation's `done` set so
+        # the user does NOT need `pronunciation --only-rejected` after the
+        # regeneration cycle — a plain `pronunciation` re-scores only the new
+        # ones.
+        pron_done = common.read_checkpoint(cfg.paths.pronunciation_checkpoint)
+        pron_done -= rejected_idx
+        common.write_checkpoint(cfg.paths.pronunciation_checkpoint, pron_done)
         rejected_dir = cfg.paths.rejected
         for idx in rejected_idx:
             # Wav in raw_wav/ is the old source we generated from — drop it

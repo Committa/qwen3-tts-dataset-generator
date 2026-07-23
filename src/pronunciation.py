@@ -586,6 +586,80 @@ def _build_clips(cfg: common.Config) -> list[_Clip]:
     return clips
 
 
+def _build_clips_from_rejected(cfg: common.Config) -> list[_Clip]:
+    """Build the list of clips to re-verify from ``rejected/*.json``.
+
+    Unlike :func:`_build_clips` (which reads from ``accepted_wav/``), this
+    reads pronunciation-rejected clips still sitting in ``rejected/`` —
+    the typical case is the user raising ``phoneme_threshold`` and wanting
+    to re-evaluate the previously-rejected audio in place, without going
+    through the generate/validate regeneration cycle.
+
+    Sidecar JSONs are filtered by the presence of the ``ref_phonemes``
+    field: only pronunciation-sidecars are eligible. Validate-rejected
+    sidecars (which carry ``transcription``/``wer`` but no phoneme fields)
+    are skipped — there is no point checking PER on a clip whose words are
+    wrong. The corresponding wav must also exist in ``rejected/``.
+
+    Args:
+        cfg: Pipeline configuration.
+
+    Returns:
+        A list of ``_Clip`` whose ``wav_path`` points into ``rejected/``.
+    """
+    sentences = common.load_sentences(cfg)
+    clips: list[_Clip] = []
+    rejected_dir = cfg.paths.rejected
+    for sidecar in sorted(rejected_dir.glob("*.json")):
+        try:
+            meta = json.loads(sidecar.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            logger.warning("Skipping malformed sidecar %s.", sidecar.name)
+            continue
+        if "ref_phonemes" not in meta and "hyp_phonemes" not in meta:
+            # Validate-sidecar (or unknown) — not a pronunciation reject.
+            continue
+        idx = int(meta.get("index", sidecar.stem))
+        if idx >= len(sentences):
+            logger.warning("Index %d out of range for corpus. Skipping.", idx)
+            continue
+        wav_path = rejected_dir / f"{idx:06d}.wav"
+        if not wav_path.exists():
+            logger.warning(
+                "Pronunciation sidecar for idx=%d has no wav in rejected/ "
+                "(already regenerated/validated?). Skipping.",
+                idx,
+            )
+            continue
+        clips.append(_Clip(wav_path, idx, sentences[idx]))
+    return clips
+
+
+def _accept_clip_in_place(
+    clip: _Clip,
+    cfg: common.Config,
+    sidecar_path: Path,
+) -> None:
+    """Move a clip from ``rejected/`` back to ``accepted_wav/`` and drop its sidecar.
+
+    Used by ``--only-rejected`` when a previously-rejected clip now passes
+    the (possibly raised) threshold. Mirrors the cleanup that
+    ``review_rejected._accept_clip`` performs on manual accept.
+
+    Args:
+        clip: The accepted clip (``clip.wav_path`` is in ``rejected/``).
+        cfg: Pipeline configuration.
+        sidecar_path: Path to the rejection sidecar JSON in ``rejected/``.
+    """
+    dest = cfg.paths.accepted_wav / clip.wav_path.name
+    cfg.paths.accepted_wav.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(str(clip.wav_path), str(dest))
+    clip.wav_path.unlink()
+    if sidecar_path.exists():
+        sidecar_path.unlink()
+    logger.info("PRONOUNCE-OK-IN-PLACE idx=%d -> %s", clip.idx, dest.name)
+
+
 def _evaluate(
     clips: list[_Clip],
     ref_map: dict[int, str],
@@ -681,6 +755,64 @@ def _apply_rejections(
             continue
         reason = f"per={r.per:.3f} > {cfg.phoneme_threshold:.3f}"
         _reject_clip(r.clip, cfg, reason, r.ref_phonemes, r.hyp_phonemes)
+        records.append(
+            {
+                "index": r.clip.idx,
+                "file": r.clip.wav_path.name,
+                "reason": reason,
+                "per": r.per,
+                "ref_phonemes": r.ref_phonemes,
+                "hyp_phonemes": r.hyp_phonemes,
+            }
+        )
+        logger.info("PRONOUNCE-REJECT idx=%d PER=%.3f -> %s", r.clip.idx, r.per, reason)
+    return records
+
+
+def _apply_rejections_in_place(
+    results: list[_ClipResult], cfg: common.Config
+) -> list[dict[str, Any]]:
+    """Apply accept/reject decisions on clips that live in ``rejected/``.
+
+    Used by ``--only-rejected`` when re-scoring previously-rejected clips
+    (e.g. after raising ``phoneme_threshold``). Unlike
+    :func:`_apply_rejections` (which moves wavs ``accepted_wav/`` ->
+    ``rejected/``), here the wavs are ALREADY in ``rejected/``:
+
+    - Accept (PER within threshold): move wav back to ``accepted_wav/``,
+      remove the rejection sidecar. The clip is no longer rejected.
+    - Reject (PER still > threshold): the wav stays in ``rejected/``; the
+      sidecar is overwritten with the new PER reason so the user sees the
+      updated score.
+
+    Args:
+        results: Evaluation results from :func:`_evaluate` (clips whose
+            ``wav_path`` is in ``rejected/``).
+        cfg: Pipeline configuration.
+
+    Returns:
+        A list of rejection records (only for clips still rejected) for the
+        ``pronunciation.log`` aggregate.
+    """
+    records: list[dict[str, Any]] = []
+    for r in results:
+        sidecar_path = cfg.paths.rejected / f"{r.clip.idx:06d}.json"
+        if r.accepted:
+            _accept_clip_in_place(r.clip, cfg, sidecar_path)
+            continue
+        reason = f"per={r.per:.3f} > {cfg.phoneme_threshold:.3f}"
+        # Wav stays in rejected/ — just refresh the sidecar with the new PER.
+        meta = {
+            "index": r.clip.idx,
+            "file": r.clip.wav_path.name,
+            "expected": r.clip.expected,
+            "ref_phonemes": r.ref_phonemes,
+            "hyp_phonemes": r.hyp_phonemes,
+            "reason": reason,
+        }
+        sidecar_path.write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         records.append(
             {
                 "index": r.clip.idx,
@@ -1021,28 +1153,36 @@ def run_pronunciation(
     The pronunciation checkpoint (``cfg.paths.pronunciation_checkpoint``)
     records indices that have been fully processed (accept OR reject) by a
     previous non-calibrate run. Same semantic as generate's and validate's
-    checkpoints: ``done`` = "completed, do not redo". Used for both
-    resumability (a partial re-run skips already-done clips) and
-    ``--only-rejected`` deduplication.
+    checkpoints: ``done`` = "completed, do not redo". Used ONLY for
+    resumability of the normal full run (a partial re-run skips
+    already-done clips). ``--only-rejected`` does NOT filter by ``done``.
 
-    When ``only_rejected=True``, the source of "what to consider" is the
-    single ``rejected/*.json`` directory (the same source generate and
-    validate use, step-agnostic). Pronunciation intersects it with
-    ``accepted_wav/`` (it can only check clips that validate accepted) and
-    removes indices already in ``done`` (already processed). The result is
-    then intersected with the actual clips in ``accepted_wav/`` to drop
-    any that disappeared between reads.
+    When ``only_rejected=True``, the source of "what to consider" is
+    step-SPECIFIC (unlike generate/validate --only-rejected, which are
+    step-agnostic): only pronunciation-sidecars (JSON carrying
+    ``ref_phonemes``/``hyp_phonemes``) are eligible. Validate-rejected
+    sidecars are skipped — there is no point scoring PER on a clip whose
+    WORDS are wrong. Clips are read from ``rejected/`` (the wavs live
+    there), NOT from ``accepted_wav/``, and `done` is NOT used as a filter
+    — the user is explicitly asking to re-evaluate previously-rejected
+    audio, e.g. they raised ``phoneme_threshold`` and want the same wavs
+    re-scored against the new threshold.
+
+    Accept on --only-rejected moves the wav back to ``accepted_wav/`` and
+    removes the sidecar (the clip is no longer rejected). Reject just
+    refreshes the sidecar PER in place (wav stays in ``rejected/``).
 
     Args:
         cfg: Pipeline configuration.
         calibrate: If True, measure-only mode (no rejections); prints and
             returns the PER distribution. The checkpoint is NOT updated in
             calibrate mode.
-        only_rejected: If True, restrict the work set to indices present in
-            ``rejected/*.json`` AND in ``accepted_wav/`` AND not yet in
-            ``done``. Step-agnostic on the input side: validate-rejected
-            and pronunciation-rejected indices are both eligible, identical
-            to how generate/validate --only-rejected behave.
+        only_rejected: If True, restrict the work set to
+            pronunciation-rejected clips still sitting in ``rejected/``
+            (identified by the ``ref_phonemes`` sidecar field), reading
+            the wavs from ``rejected/`` in place. Step-specific: validate
+            rejects are NOT eligible (different from
+            generate/validate --only-rejected, which are step-agnostic).
 
     Returns:
         A dict with ``checked``, ``phoneme_rejected``, ``mean_per``,
@@ -1059,38 +1199,33 @@ def run_pronunciation(
         cfg.phoneme_threshold,
     )
 
-    clips = _build_clips(cfg)
-
     # --- Load pronunciation checkpoint (parallel to generate/validate) ---
     # `done` = indices that pronunciation has FINISHED processing (accept or
     # reject). Same semantic as generate's `done` and validate's `done`:
-    # "completed, do not redo" — for both resumability and --only-rejected
-    # deduplication. This makes the three checkpoints interchangeable.
+    # "completed, do not redo" — used for resumability of the normal full run
+    # (skip already-processed clips). NOTE: --only-rejected does NOT filter by
+    # `done` (see below).
     done: set[int] = common.read_checkpoint(cfg.paths.pronunciation_checkpoint)
 
     if only_rejected:
-        # Mirror generate/validate --only-rejected: read the rejected set from
-        # `rejected/*.json` (single source of truth, step-agnostic), then
-        # intersect with accepted_wav/ (pronunciation operates on validated
-        # clips) and remove indices already in `done` (already processed in
-        # a previous run).
-        rejected_idx = common.read_rejected_indices(cfg)
-        accepted_wav_idx = {int(p.stem) for p in cfg.paths.accepted_wav.glob("*.wav")}
-        in_rejected_and_accepted = rejected_idx & accepted_wav_idx
-        target = in_rejected_and_accepted - done
-        target_set = set(target)
-        before = len(clips)
-        clips = [c for c in clips if c.idx in target_set]
+        # Step-specific source: pronunciation-rejected sidecars only.
+        # Unlike generate/validate --only-rejected (which are step-agnostic
+        # and read every sidecar in rejected/), pronunciation --only-rejected
+        # is scoped to pronunciation-sidecars — i.e. sidecars that carry the
+        # `ref_phonemes`/`hyp_phonemes` fields. Validate-rejected sidecars
+        # (transcription/wer only) are skipped: there is no point scoring PER
+        # on a clip whose WORDS are wrong. Clips are read from rejected/
+        # (the wavs live there), NOT from accepted_wav/. The `done` set is
+        # therefore NOT used as a filter here — the user is explicitly asking
+        # to re-evaluate previously-rejected audio (e.g. they raised
+        # phoneme_threshold), so even already-processed clips must be re-scored.
+        clips = _build_clips_from_rejected(cfg)
         logger.info(
-            "--only-rejected: %d in rejected/, %d in accepted_wav/, "
-            "%d already done, %d to process",
-            len(rejected_idx),
-            len(in_rejected_and_accepted),
-            before - len(clips),
-            len(clips),
+            "--only-rejected: %d pronunciation-rejected clips to re-score", len(clips)
         )
     else:
-        # Normal full run: process only what hasn't been done yet (resumability).
+        # Normal full run: build from accepted_wav/, skip already-done (resumability).
+        clips = _build_clips(cfg)
         before = len(clips)
         clips = [c for c in clips if c.idx not in done]
         if before - len(clips):
@@ -1144,7 +1279,12 @@ def run_pronunciation(
         result["calibration"] = _calibration_summary(per_values, cfg.phoneme_threshold)
         _log_calibration(result["calibration"])
     else:
-        records = _apply_rejections(results, cfg)
+        if only_rejected:
+            # Clips live in rejected/ — accept moves them back to accepted_wav/,
+            # reject just refreshes the sidecar PER in place.
+            records = _apply_rejections_in_place(results, cfg)
+        else:
+            records = _apply_rejections(results, cfg)
         _write_rejected_log(records, cfg)
         result["phoneme_rejected"] = len(records)
         result["rejected_records"] = records
