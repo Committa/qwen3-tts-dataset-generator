@@ -1019,22 +1019,30 @@ def run_pronunciation(
     returned so the user can pick a threshold before committing.
 
     The pronunciation checkpoint (``cfg.paths.pronunciation_checkpoint``)
-    records indices that have been accepted (PER <= threshold) by a previous
-    non-calibrate run. When ``only_rejected=True``, only clips whose index is
-    NOT in the checkpoint are processed, enabling the standard
-    ``generate --only-rejected`` -> ``validate --only-rejected`` ->
-    ``pronunciation --only-rejected`` regeneration cycle without re-scoring
-    clips that already passed. The checkpoint is updated incrementally as
-    clips are accepted, mirroring the write-on-accept pattern of generate's
-    checkpoint (so a crash mid-run loses at most the current batch).
+    records indices that have been fully processed (accept OR reject) by a
+    previous non-calibrate run. Same semantic as generate's and validate's
+    checkpoints: ``done`` = "completed, do not redo". Used for both
+    resumability (a partial re-run skips already-done clips) and
+    ``--only-rejected`` deduplication.
+
+    When ``only_rejected=True``, the source of "what to consider" is the
+    single ``rejected/*.json`` directory (the same source generate and
+    validate use, step-agnostic). Pronunciation intersects it with
+    ``accepted_wav/`` (it can only check clips that validate accepted) and
+    removes indices already in ``done`` (already processed). The result is
+    then intersected with the actual clips in ``accepted_wav/`` to drop
+    any that disappeared between reads.
 
     Args:
         cfg: Pipeline configuration.
         calibrate: If True, measure-only mode (no rejections); prints and
             returns the PER distribution. The checkpoint is NOT updated in
             calibrate mode.
-        only_rejected: If True, skip clips already in the pronunciation
-            checkpoint (process only newly-added clips in ``accepted_wav/``).
+        only_rejected: If True, restrict the work set to indices present in
+            ``rejected/*.json`` AND in ``accepted_wav/`` AND not yet in
+            ``done``. Step-agnostic on the input side: validate-rejected
+            and pronunciation-rejected indices are both eligible, identical
+            to how generate/validate --only-rejected behave.
 
     Returns:
         A dict with ``checked``, ``phoneme_rejected``, ``mean_per``,
@@ -1053,17 +1061,44 @@ def run_pronunciation(
 
     clips = _build_clips(cfg)
 
-    # --- --only-rejected filter: skip clips already accepted by a previous run ---
-    accepted_checkpoint: set[int] = set()
+    # --- Load pronunciation checkpoint (parallel to generate/validate) ---
+    # `done` = indices that pronunciation has FINISHED processing (accept or
+    # reject). Same semantic as generate's `done` and validate's `done`:
+    # "completed, do not redo" — for both resumability and --only-rejected
+    # deduplication. This makes the three checkpoints interchangeable.
+    done: set[int] = common.read_checkpoint(cfg.paths.pronunciation_checkpoint)
+
     if only_rejected:
-        accepted_checkpoint = common.read_checkpoint(cfg.paths.pronunciation_checkpoint)
+        # Mirror generate/validate --only-rejected: read the rejected set from
+        # `rejected/*.json` (single source of truth, step-agnostic), then
+        # intersect with accepted_wav/ (pronunciation operates on validated
+        # clips) and remove indices already in `done` (already processed in
+        # a previous run).
+        rejected_idx = common.read_rejected_indices(cfg)
+        accepted_wav_idx = {int(p.stem) for p in cfg.paths.accepted_wav.glob("*.wav")}
+        in_rejected_and_accepted = rejected_idx & accepted_wav_idx
+        target = in_rejected_and_accepted - done
+        target_set = set(target)
         before = len(clips)
-        clips = [c for c in clips if c.idx not in accepted_checkpoint]
+        clips = [c for c in clips if c.idx in target_set]
         logger.info(
-            "--only-rejected: %d already accepted (skipped), %d to process",
+            "--only-rejected: %d in rejected/, %d in accepted_wav/, "
+            "%d already done, %d to process",
+            len(rejected_idx),
+            len(in_rejected_and_accepted),
             before - len(clips),
             len(clips),
         )
+    else:
+        # Normal full run: process only what hasn't been done yet (resumability).
+        before = len(clips)
+        clips = [c for c in clips if c.idx not in done]
+        if before - len(clips):
+            logger.info(
+                "Resumability: %d already done (skipped), %d to process",
+                before - len(clips),
+                len(clips),
+            )
 
     if not clips:
         logger.warning(
@@ -1119,24 +1154,23 @@ def run_pronunciation(
             len(records),
             mean_per,
         )
-        # --- Persist pronunciation checkpoint: accepted indices ---
-        # Two modes:
-        # - only_rejected=True: merge newly-accepted with the pre-existing
-        #   checkpoint (we only re-scored previously-rejected clips, so the
-        #   already-accepted ones stay accepted).
-        # - only_rejected=False: replace the checkpoint with the freshly-
-        #   computed accepted set (we re-scored every clip, so a threshold
-        #   change can drop previously-accepted clips correctly).
-        newly_accepted = {r.clip.idx for r in results if r.accepted}
+        # --- Persist pronunciation checkpoint: all processed indices ---
+        # Same as generate/validate: `done` is the cumulative set of fully-
+        # processed indices (accept OR reject). On --only-rejected we merge
+        # with the existing checkpoint (we only re-scored a subset, the rest
+        # stays done). On a full pass we replace (we re-scored everything
+        # present, so the checkpoint must reflect that — a threshold change
+        # can drop previously-accepted clips correctly this way).
+        newly_done = {r.clip.idx for r in results}
         if only_rejected:
-            final_accepted = accepted_checkpoint | newly_accepted
+            final_done = done | newly_done
         else:
-            final_accepted = newly_accepted
-        common.write_checkpoint(cfg.paths.pronunciation_checkpoint, final_accepted)
+            final_done = newly_done
+        common.write_checkpoint(cfg.paths.pronunciation_checkpoint, final_done)
         logger.info(
-            "Pronunciation checkpoint updated: %d total accepted (%d newly this run)",
-            len(final_accepted),
-            len(newly_accepted),
+            "Pronunciation checkpoint updated: %d total done (%d processed this run)",
+            len(final_done),
+            len(newly_done),
         )
 
     # --- Per-word PER report (diagnostic, both modes) ---

@@ -459,7 +459,14 @@ def run_validate(cfg: common.Config, only_rejected: bool = False) -> dict[str, A
             len(rejected_indices),
         )
 
-        # Copy rejected wavs back to raw_wav (if missing) and clean old artifacts.
+        # Copy rejected wavs back to raw_wav (if missing) so they can be
+        # re-validated. We deliberately do NOT touch the rejection sidecar
+        # JSONs in rejected/: they are the shared "queue" that
+        # ``generate --only-rejected`` and ``pronunciation --only-rejected``
+        # also read from. The sidecar for a still-rejected clip will be
+        # overwritten by the new rejection write; for a now-accepted clip
+        # the sidecar becomes stale but is harmless (the wav is no longer
+        # in rejected/, so it is skipped by downstream --only-rejected).
         for idx in rejected_indices:
             wav_name = f"{idx:06d}.wav"
             src = rejected_dir / wav_name
@@ -470,9 +477,6 @@ def run_validate(cfg: common.Config, only_rejected: bool = False) -> dict[str, A
                 src.unlink()
             if not dst.exists():
                 logger.warning("Rejected wav not found for idx=%d.", idx)
-            json_path = rejected_dir / f"{idx:06d}.json"
-            if json_path.exists():
-                json_path.unlink()
 
     # --- Load ASR model ---
     files = sorted(raw_dir.glob("*.wav"))

@@ -370,9 +370,9 @@ def _accept_clip(cfg: common.Config, clip: RejectedClip) -> None:
 
     For pronunciation-step rejections (sidecar carries ``ref_phonemes`` /
     ``hyp_phonemes``), the clip's index is added to the pronunciation
-    checkpoint so a subsequent ``--step pronunciation --only-rejected`` does
-    not re-score it. Validate-step rejects are not tracked there because
-    validate already manages its own checkpoint.
+    ``done`` set so a subsequent ``--step pronunciation --only-rejected``
+    does not re-score it. Validate-step rejects are not tracked there
+    because validate already manages its own checkpoint.
 
     Args:
         cfg: Pipeline configuration.
@@ -393,11 +393,11 @@ def _accept_clip(cfg: common.Config, clip: RejectedClip) -> None:
         if p.exists():
             p.unlink()
     # Sync pronunciation checkpoint: a manually-accepted pronunciation-reject
-    # should not be re-scored on the next --only-rejected pass.
+    # is "done" from pronunciation's POV — do not re-score on the next pass.
     if clip.ref_phonemes or clip.hyp_phonemes:
-        accepted = common.read_checkpoint(cfg.paths.pronunciation_checkpoint)
-        accepted.add(clip.index)
-        common.write_checkpoint(cfg.paths.pronunciation_checkpoint, accepted)
+        done = common.read_checkpoint(cfg.paths.pronunciation_checkpoint)
+        done.add(clip.index)
+        common.write_checkpoint(cfg.paths.pronunciation_checkpoint, done)
         logger.info(
             "Pronunciation checkpoint updated (manual accept): idx=%d", clip.index
         )
@@ -438,9 +438,9 @@ def _restore_rejected(cfg: common.Config, clip: RejectedClip) -> None:
     # Undo the pronunciation-checkpoint add from the prior _accept_clip call,
     # so the clip will be re-scored on the next --only-rejected pass.
     if clip.ref_phonemes or clip.hyp_phonemes:
-        accepted = common.read_checkpoint(cfg.paths.pronunciation_checkpoint)
-        accepted.discard(clip.index)
-        common.write_checkpoint(cfg.paths.pronunciation_checkpoint, accepted)
+        done = common.read_checkpoint(cfg.paths.pronunciation_checkpoint)
+        done.discard(clip.index)
+        common.write_checkpoint(cfg.paths.pronunciation_checkpoint, done)
         logger.info(
             "Pronunciation checkpoint updated (re-rejected): idx=%d", clip.index
         )
