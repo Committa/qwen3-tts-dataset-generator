@@ -267,6 +267,14 @@ def _handle_result(
     if res["accept"]:
         dest = cfg.paths.accepted_wav / wav_path.name
         shutil.copy2(str(wav_path), str(dest))
+        # If this clip was previously rejected (validate --only-rejected on
+        # an already-rejected clip that now passes), the rejection sidecar
+        # is still in rejected/ but the wav has just left. Delete it so
+        # rejected/ stays a clean queue of actually-rejected clips only.
+        sidecar = cfg.paths.rejected / f"{idx:06d}.json"
+        if sidecar.exists():
+            sidecar.unlink()
+            logger.info("Cleaned up orphan sidecar for idx=%d", idx)
         logger.info("ACCEPTED idx=%d WER=%.3f -> %s", idx, res["wer"], dest.name)
         return "accepted"
     _move_to_rejected(
