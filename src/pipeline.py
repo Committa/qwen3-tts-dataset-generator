@@ -138,16 +138,6 @@ def _maybe_clean_workspace(cfg: common.Config, do_clean: bool, no_clean: bool) -
     default=None,
     help="Manually accept rejected clips by index (comma-separated, e.g. '7,13').",
 )
-@click.option(
-    "--reset-done",
-    is_flag=True,
-    default=False,
-    help="With --step pronunciation: delete workspace/.pronunciation_checkpoint.json "
-    "before the run, forcing a full re-evaluation of all clips in accepted_wav/ "
-    "(ignore resumability). Useful after generate --only-rejected + validate "
-    "--only-rejected when the user wants pronunciation to re-check everything "
-    "rather than just the regenerated subset tracked by the P2 logic.",
-)
 def main(
     config_path: str | None,
     step: str,
@@ -156,7 +146,6 @@ def main(
     only_rejected: bool,
     calibrate: bool,
     accept_indices: str | None,
-    reset_done: bool,
 ) -> None:
     """Orchestrate the TTS dataset pipeline.
 
@@ -215,10 +204,6 @@ def main(
         raise click.UsageError(
             "--calibrate can only be used with --step pronunciation."
         )
-    if reset_done and step != "pronunciation":
-        raise click.UsageError(
-            "--reset-done can only be used with --step pronunciation."
-        )
 
     # --- Load config and set up ---
     cfg = common.load_config(config_path)
@@ -264,13 +249,6 @@ def main(
             elif s == "validate":
                 val_stats = val_mod.run_validate(cfg, only_rejected=only_rejected)
             elif s == "pronunciation":
-                if reset_done:
-                    if cfg.paths.pronunciation_checkpoint.exists():
-                        cfg.paths.pronunciation_checkpoint.unlink()
-                        logger.info(
-                            "--reset-done: deleted %s",
-                            cfg.paths.pronunciation_checkpoint,
-                        )
                 pron_stats = pron_mod.run_pronunciation(
                     cfg,
                     calibrate=calibrate,
