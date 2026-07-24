@@ -1175,12 +1175,16 @@ def run_pronunciation(
     Regenerated-only path: when ``generate --only-rejected`` runs, it
     writes ``workspace/.regenerated.json`` containing the indices it
     regenerated. On a subsequent ``pronunciation`` run (no flag), if
-    that file exists, it is consumed (one-shot, deleted after read): the
-    work set becomes exactly the regenerated indices intersected with
-    ``accepted_wav/``. Resumability (``done``) is bypassed because the
-    new audio has no PER score yet. This avoids the noise caused by
-    operations that mutate ``done`` (e.g. ``review-rejected`` manual
-    accept) between the regen cycle and the pronunciation run.
+    that file exists, the work set becomes exactly the regenerated
+    indices intersected with ``accepted_wav/``, with the ``done``
+    set used to skip entries already processed in a previous
+    (interrupted) run. The manifest file is deleted only at the
+    end of a successful `run_pronunciation` invocation, so a Ctrl+C
+    mid-check leaves the file in place and the next `pronunciation`
+    run resumes from where it stopped. This avoids the noise caused
+    by operations that mutate ``done`` (e.g. ``review-rejected``
+    manual accept) between the regen cycle and the pronunciation
+    run.
 
     Args:
         cfg: Pipeline configuration.
@@ -1225,6 +1229,12 @@ def run_pronunciation(
     # the resumability state (`done` is mutable by other operations like
     # review-rejected manual-accept, so it cannot reliably track the
     # regenerated subset).
+    #
+    # Resume safety: the file is NOT deleted here. It is deleted at the
+    # end of `run_pronunciation` only if the check completed successfully
+    # (no exception propagated out). If the user Ctrl+C's mid-check, the
+    # file survives and the next `pronunciation` run picks up the
+    # remaining (not-yet-done) indices via a `done` filter.
     regen_path = cfg.paths.regenerated
     regen_target: set[int] | None = None
     if regen_path.exists():
@@ -1237,10 +1247,10 @@ def run_pronunciation(
                 int(p.stem) for p in cfg.paths.accepted_wav.glob("*.wav")
             }
             regen_target = regen_target & accepted_wav_idx
-            regen_path.unlink()
             logger.info(
-                "Regenerated manifest consumed: %d indices to re-score, "
-                "file deleted",
+                "Regenerated manifest read: %d indices eligible to re-score "
+                "(filter done and intersect accepted_wav/ below; "
+                "file deleted only on successful completion)",
                 len(regen_target),
             )
         else:
@@ -1265,14 +1275,27 @@ def run_pronunciation(
         )
     elif regen_target is not None and regen_target:
         # Regenerated-only path: build the work list from accepted_wav/
-        # restricted to the regenerated indices. Resumability is bypassed
-        # because the new audio has no PER score yet — we MUST re-score.
+        # restricted to the regenerated indices. Resumability against the
+        # `done` set is applied so a Ctrl+C'd previous run can resume
+        # cleanly: only the not-yet-processed manifest entries are
+        # re-scored. The new audio has no PER score yet, so we MUST hit
+        # every manifest entry at least once — the `done` filter just
+        # avoids re-scoring the ones that completed in a previous run.
         clips = _build_clips(cfg)
         target_set = set(regen_target)
-        clips = [c for c in clips if c.idx in target_set]
-        logger.info(
-            "Regenerated-only: %d clips in accepted_wav/ to re-score", len(clips)
-        )
+        before = len(clips)
+        clips = [c for c in clips if c.idx in target_set and c.idx not in done]
+        if before - len(clips):
+            logger.info(
+                "Resume: %d manifest clips already in done (skipped), %d to process",
+                before - len(clips),
+                len(clips),
+            )
+        else:
+            logger.info(
+                "Regenerated-only: %d clips in accepted_wav/ to re-score",
+                len(clips),
+            )
     else:
         # Normal full run: build from accepted_wav/, skip already-done (resumability).
         clips = _build_clips(cfg)
@@ -1386,5 +1409,13 @@ def run_pronunciation(
             r for r in word_rows if r["occurrences"] >= min_occ and r["mean_per"] > 0.0
         ][: cfg.phoneme_word_top_n]
         result["worst_words"] = filtered_worst
+
+    # Final cleanup of the regenerated manifest. Reached only if the
+    # function returned normally (no exception), so a Ctrl+C mid-check
+    # leaves the file in place for a future `pronunciation` run to
+    # resume. Also cleans up when the file was empty at start of run.
+    if regen_path.exists():
+        regen_path.unlink()
+        logger.info("Regenerated manifest consumed and deleted: %s", regen_path)
 
     return result
