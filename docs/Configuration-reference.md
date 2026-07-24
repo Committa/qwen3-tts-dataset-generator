@@ -61,8 +61,7 @@ resolved relative to `PROJECT_ROOT` (= repo root).
 ├── config.yaml
 ├── docs/                  # deeper guides (linked from README)
 ├── src/
-│   ├── __init__.py
-│   ├── common.py           # shared utilities (Config/Paths, logging, checkpoint)
+│   ├── common.py           # shared utilities
 │   ├── generate.py         # audio generation
 │   ├── validate.py         # ASR validation (WER)
 │   ├── pronunciation.py    # phoneme-level verification (PER)
@@ -70,13 +69,12 @@ resolved relative to `PROJECT_ROOT` (= repo root).
 │   ├── build_manifest.py   # LJSpeech manifest
 │   ├── report.py           # final report
 │   ├── review_rejected.py  # review-rejected interactive triage CLI
-│   ├── pipeline.py         # CLI orchestrator (entry point: gen-dataset)
-│   └── test_speaker.py     # speaker test utility (entry point: test-gen-dataset)
+│   ├── pipeline.py         # CLI orchestrator
+│   └── test_speaker.py     # speaker test utility
 ├── inputs/                 # user-provided text corpora and voice samples
 │   ├── sentences.txt
 │   ├── test_sentences.txt
 │   └── voices/             # custom voices for base (voice clone) mode
-│       ├── .gitkeep
 │       └── <name>.wav        # + <name>.txt for ICL transcript
 ├── workspace/              # volatile (auto-cleaned on full run, gitignored)
 │   ├── .voice_cache/                  # per-voice per-model-size VoiceClonePromptItem cache
