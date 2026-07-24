@@ -187,42 +187,9 @@ drift across thousands of clips).
 
 ## Project structure
 
-```
-.
-├── pyproject.toml
-├── Dockerfile
-├── config.yaml
-├── docs/                  # deeper guides (linked from this README)
-├── src/
-│   ├── common.py           # shared utilities
-│   ├── generate.py         # audio generation
-│   ├── validate.py         # ASR validation (WER)
-│   ├── pronunciation.py    # phoneme-level verification (PER)
-│   ├── normalize_audio.py  # audio normalization
-│   ├── build_manifest.py   # LJSpeech manifest
-│   ├── report.py           # final report
-│   ├── pipeline.py         # CLI orchestrator
-│   └── test_speaker.py     # speaker test utility
-├── inputs/                 # user-provided text corpora and voice samples
-│   ├── sentences.txt
-│   ├── test_sentences.txt
-│   └── voices/             # custom voices for base (voice clone) mode
-│       └── <name>.wav        # + <name>.txt for ICL transcript
-├── workspace/              # volatile (auto-cleaned on full run)
-│   ├── raw_wav/
-│   ├── accepted_wav/
-│   ├── rejected/
-│   ├── .generate_checkpoint.json
-│   └── .validate_checkpoint.json
-├── output/                 # immutable dataset archives
-│   ├── gen001/
-│   │   ├── wavs/
-│   │   ├── metadata_train.csv
-│   │   ├── metadata_val.csv
-│   │   └── report.json
-│   └── ...
-└── logs/
-```
+See the **[Project structure](docs/Configuration-reference.md#paths)** section
+of the configuration reference for the full directory tree (including the
+volatile `workspace/` files and the immutable `output/gen{NNN}/` archives).
 
 ## Further reading
 

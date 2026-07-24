@@ -50,14 +50,59 @@ are resolved relative to `PROJECT_ROOT` (= repo root, computed as
 `Paths` dataclass holds all pipeline paths. Only `input_sentences` and
 `test_sentences` are configurable in `config.yaml` (top-level keys); all
 other paths are fixed defaults defined in `_RUNTIME_PATH_DEFAULTS` and
-resolved relative to `PROJECT_ROOT`:
+resolved relative to `PROJECT_ROOT` (= repo root).
 
-| Fixed path | Purpose |
-|---|---|
-| `workspace/raw_wav/` | generated audio |
-| `workspace/accepted_wav/` | validate + pronunciation survivors |
-| `workspace/rejected/` | rejected clips (with sidecar JSONs) |
-| manifests, report, checkpoint, log_file, prompt_cache | internal pipeline state |
+### Project structure
+
+```
+.
+├── pyproject.toml
+├── Dockerfile
+├── config.yaml
+├── docs/                  # deeper guides (linked from README)
+├── src/
+│   ├── common.py           # shared utilities
+│   ├── generate.py         # audio generation
+│   ├── validate.py         # ASR validation (WER)
+│   ├── pronunciation.py    # phoneme-level verification (PER)
+│   ├── normalize_audio.py  # audio normalization
+│   ├── build_manifest.py   # LJSpeech manifest
+│   ├── report.py           # final report
+│   ├── pipeline.py         # CLI orchestrator
+│   └── test_speaker.py     # speaker test utility
+├── inputs/                 # user-provided text corpora and voice samples
+│   ├── sentences.txt
+│   ├── test_sentences.txt
+│   └── voices/             # custom voices for base (voice clone) mode
+│       └── <name>.wav        # + <name>.txt for ICL transcript
+├── workspace/              # volatile (auto-cleaned on full run, gitignored)
+│   ├── .voice_cache/                  # per-voice per-model-size VoiceClonePromptItem cache
+│   ├── raw_wav/                       # generated audio
+│   ├── accepted_wav/                  # validate + pronunciation survivors
+│   ├── rejected/                      # rejected clips + sidecar JSONs
+│   ├── .generate_checkpoint.json      # generate step resumability (done indices)
+│   ├── .validate_checkpoint.json      # validate step resumability
+│   ├── .pronunciation_checkpoint.json # pronunciation step resumability
+│   ├── .review_checkpoint.json        # review-rejected interactive triage state
+│   ├── .manifest_train.csv            # train manifest (before publish)
+│   ├── .manifest_val.csv              # validation manifest (before publish)
+│   ├── .pronunciation_words.csv       # per-word PER ranking (when phoneme_word_report)
+│   ├── .pronunciation_report.txt      # pronunciation step CLI/log dump
+│   └── .report.json                   # final report (before publish)
+├── output/                 # immutable dataset archives
+│   ├── gen001/
+│   │   ├── wavs/
+│   │   ├── metadata_train.csv
+│   │   ├── metadata_val.csv
+│   │   └── report.json
+│   └── ...
+└── logs/
+```
+
+`workspace/` is gitignored (`workspace/*` with `!workspace/.gitkeep`) and
+auto-cleaned on a fresh full run (`clean_on_full_run: true`), so you will
+not see all of these files until you run the pipeline. `output/gen{NNN}/`
+archives are immutable — each full run produces a new numbered directory.
 
 ## Sampling parameters
 
