@@ -157,6 +157,9 @@ poetry run gen-dataset --from pronunciation   # pronunciation + normalize + publ
 # corpus: ~1 minute instead of ~11), use:
 poetry run gen-dataset --step pronunciation --only-rejected
 poetry run gen-dataset --from normalize
+# Or, if you want pronunciation to re-check everything in accepted_wav/
+# ignoring the resumability cache (e.g. after multiple regen cycles):
+poetry run gen-dataset --step pronunciation --reset-done
 
 # Option B (full): regenerate rejected, but re-validate everything
 poetry run gen-dataset --step generate --only-rejected
