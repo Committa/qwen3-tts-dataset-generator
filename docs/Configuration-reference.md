@@ -90,13 +90,14 @@ resolved relative to `PROJECT_ROOT` (= repo root).
 │   ├── .pronunciation_words.csv       # per-word PER ranking (when phoneme_word_report)
 │   ├── .pronunciation_report.txt      # pronunciation step CLI/log dump
 │   └── .report.json                   # final report (before publish)
-├── output/                 # immutable dataset archives
+├── output/                 # immutable datasets + speaker test output
 │   ├── gen001/
 │   │   ├── wavs/
 │   │   ├── metadata_train.csv
 │   │   ├── metadata_val.csv
 │   │   └── report.json
-│   └── ...
+│   ├── ...
+│   └── test_speaker/        # test-gen-dataset output (<speaker>_<i>.wav + .txt)
 └── logs/
 ```
 
