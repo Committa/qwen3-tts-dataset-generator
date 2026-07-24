@@ -320,6 +320,23 @@ def _load_rejected_clips(cfg: common.Config) -> list[RejectedClip]:
     return clips
 
 
+def _resolve_wav_path(cfg: common.Config, clip: RejectedClip) -> Path:
+    """Return the actual wav path for playback.
+
+    After an accept (``a``), the wav is moved from ``rejected/`` to
+    ``accepted_wav/``, so ``clip.wav_path`` (which always points to
+    ``rejected/``) is stale for the remainder of the session. This helper
+    checks both locations so ``b``-rewind playback finds the file.
+    """
+    path = clip.wav_path
+    if path.exists():
+        return path
+    alt = cfg.paths.accepted_wav / clip.wav_path.name
+    if alt.exists():
+        return alt
+    return path  # fall back; Player.play logs the error
+
+
 def _load_checkpoint(path: Path) -> dict[str, dict]:
     """Read the review checkpoint (decisions only, no sidecar cache for v1).
 
@@ -393,7 +410,7 @@ def _accept_clip(cfg: common.Config, clip: RejectedClip) -> None:
         cfg.paths.accepted_wav.mkdir(parents=True, exist_ok=True)
         shutil.copy2(str(src), str(dest))
     for p in (clip.sidecar_path, clip.wav_path):
-        if p.exists():
+        if p.exists() and p.parent == cfg.paths.rejected:
             p.unlink()
     logger.info("ACCEPT idx=%d -> %s", clip.index, src.name)
 
@@ -437,12 +454,9 @@ def _restore_rejected(cfg: common.Config, clip: RejectedClip) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def _format_header(
-    clip: RejectedClip, position: int, total: int, note: str = ""
-) -> str:
+def _format_header(clip: RejectedClip, note: str = "") -> str:
     """Build the one-line header shown above each clip's text."""
     base = (
-        f"[{position:>{len(str(total))}}/{total}]  "
         f"idx={clip.index:06d}  "
         f"{clip.metric_label}={clip.metric_value:.3f} "
         f"(thr {clip.threshold:.3f})  "
@@ -461,10 +475,10 @@ def _format_duration(path: Path) -> str:
         return ""
 
 
-def _display_clip(clip: RejectedClip, position: int, total: int) -> None:
+def _display_clip(clip: RejectedClip) -> None:
     """Print the per-clip header + texts to the terminal (no newline flush)."""
     dur = _format_duration(clip.wav_path)
-    header = _format_header(clip, position, total)
+    header = _format_header(clip)
     if dur:
         header = f"{header}  dur={dur}"
     print(header)
@@ -512,24 +526,23 @@ def _show_progress(
 ) -> None:
     """Print a one-line progress banner before each clip's display.
 
-    Shows how many clips have been decided (this session + previous), the
-    accept/reject breakdown, and how many remain. Persists across the
-    clear-screen and the replay flow so the user never loses track of where
-    they are in the triage — important when the queue spans multiple
-    sessions and the checkpoint is the only cross-session memory.
+    Only counts decisions for clips in the *current queue*, so the numbers
+    stay consistent even when the checkpoint holds decisions from previous
+    sessions for indices no longer in ``rejected/``.
 
     Args:
-        clips: All rejected clips currently in the queue (the total).
-        decisions: Map of already-decided ``str(idx) -> {"action": ...}``;
-            mutated in place as the user decides, so its length is the
-            ground truth for "decided so far".
-        cursor: Position of the next clip to display in ``clips`` (0-based).
-            Used only to print the current position; the counts are derived
-            from ``decisions`` and ``clips`` length, not the cursor.
+        clips: All rejected clips currently in the queue.
+        decisions: Map of ``str(idx) -> {"action": ...}`` from the
+            checkpoint; may contain entries for indices not in ``clips``.
+        cursor: Position of the current clip in ``clips`` (0-based).
     """
     total = len(clips)
-    decided = len(decisions)
-    accepted = sum(1 for v in decisions.values() if v.get("action") == "accepted")
+    decided = sum(1 for c in clips if str(c.index) in decisions)
+    accepted = sum(
+        1
+        for c in clips
+        if decisions.get(str(c.index), {}).get("action") == "accepted"
+    )
     rejected = decided - accepted
     left = total - decided
     position = cursor + 1
@@ -576,13 +589,22 @@ def _show_feedback(text: str, color: str | None = None) -> None:
 
 
 def _print_summary(decisions: dict[str, dict], clips: list[RejectedClip]) -> None:
-    """Print a one-shot tally of decisions made so far."""
-    accepted = sum(1 for v in decisions.values() if v.get("action") == "accepted")
-    rejected = sum(1 for v in decisions.values() if v.get("action") == "rejected")
+    """Print a one-shot tally of decisions for clips currently in the queue."""
+    accepted = sum(
+        1
+        for c in clips
+        if decisions.get(str(c.index), {}).get("action") == "accepted"
+    )
+    rejected = sum(
+        1
+        for c in clips
+        if decisions.get(str(c.index), {}).get("action") == "rejected"
+    )
+    decided = accepted + rejected
     print(
         f"\n{_Colors.bold}Review summary{_Colors.reset}: "
-        f"accepted={accepted}  rejected={rejected}  total_decided={len(decisions)}  "
-        f"queue={len(clips)}"
+        f"accepted={accepted}  rejected={rejected}  "
+        f"total_decided={decided}  queue={len(clips)}"
     )
 
 
@@ -692,7 +714,7 @@ def _handle_review_key(
         _show_feedback("rejected", _Colors.red)
         return _Outcome.ADVANCE
     if key == "p":
-        player.play(clip.wav_path)
+        player.play(_resolve_wav_path(cfg, clip))
         _show_minimal_prompt()
         return _Outcome.REPLAY
     if key == "b":
@@ -780,11 +802,10 @@ def main(
     Two position counters live in the loop:
 
     - ``cursor``: 0-based index into ``clips``; the clip currently on display.
-    - ``decision_position``: 1-based counter that increments on every
-      ``a`` / ``r`` and decrements on every ``b``. Shown in the per-clip
-      header so the user sees the decision sequence number, which is
-      distinct from the queue position when the checkpoint already held
-      decisions from a previous session.
+    - The header counter (``[N/total]`` in the per-clip line) is derived from
+      ``len(decisions) + 1`` --- always the number of unique decisions made so
+      far plus one, immune to double-counting when the user re-decides the same
+      clip after a ``b``-rewind.
     """
     cfg = common.load_config(config_path)
     common.ensure_dirs(
@@ -826,7 +847,6 @@ def main(
     cursor = first_pending
     total = len(clips)
     player = _Player()
-    decision_position = len(decisions) + 1
     try:
         while cursor < total:
             clip = clips[cursor]
@@ -837,10 +857,10 @@ def main(
             if clear_screen:
                 _maybe_clear()
             _show_progress(clips, decisions, cursor)
-            _display_clip(clip, decision_position, total)
+            _display_clip(clip)
             if not note:
                 print(f"  {_Colors.dim}[playing...]{_Colors.reset}")
-            player.play(clip.wav_path)
+            player.play(_resolve_wav_path(cfg, clip))
             _show_prompt()
 
             while True:
@@ -848,18 +868,16 @@ def main(
                     cfg, clip, decisions, dry_run, player, cursor
                 )
                 if outcome is _Outcome.ADVANCE:
-                    decision_position += 1
+                    cursor += 1
                     break
                 if outcome is _Outcome.REWIND:
-                    cursor -= 1
-                    decision_position = max(1, decision_position - 1)
+                    cursor = max(0, cursor - 1)
                     break
                 if outcome is _Outcome.QUIT:
                     _print_summary(decisions, clips)
                     return
                 # REPLAY and UNKNOWN: the handler already printed the
                 # next prompt/feedback; stay in the inner loop.
-            cursor += 1
     except KeyboardInterrupt:
         logger.info("Interrupted; saving current state.")
     finally:
