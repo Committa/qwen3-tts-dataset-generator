@@ -1172,19 +1172,14 @@ def run_pronunciation(
     removes the sidecar (the clip is no longer rejected). Reject just
     refreshes the sidecar PER in place (wav stays in ``rejected/``).
 
-    Regenerated-only path: when ``generate --only-rejected`` runs, it
-    writes ``workspace/.regenerated.json`` containing the indices it
-    regenerated. On a subsequent ``pronunciation`` run (no flag), if
-    that file exists, the work set becomes exactly the regenerated
-    indices intersected with ``accepted_wav/``, with the ``done``
-    set used to skip entries already processed in a previous
-    (interrupted) run. The manifest file is deleted only at the
-    end of a successful `run_pronunciation` invocation, so a Ctrl+C
-    mid-check leaves the file in place and the next `pronunciation`
-    run resumes from where it stopped. This avoids the noise caused
-    by operations that mutate ``done`` (e.g. ``review-rejected``
-    manual accept) between the regen cycle and the pronunciation
-    run.
+    The ``done`` set (pronunciation checkpoint) is monotonic: every
+    processed index stays there forever (MERGE, not REPLACE), matching the
+    ``generate``/``validate`` checkpoint behaviour. ``generate --only-rejected``
+    removes the regenerated indices from ``done`` (P2 design in
+    ``generate.py``), so a plain ``pronunciation`` run after the regen
+    cycle picks up only the new clips via resumability.
+    ``review-rejected`` does NOT touch this checkpoint — manual accept is
+    a human decision on audio quality, not a pronunciation PER pass.
 
     Args:
         cfg: Pipeline configuration.
@@ -1221,42 +1216,6 @@ def run_pronunciation(
     # `done` (see below).
     done: set[int] = common.read_checkpoint(cfg.paths.pronunciation_checkpoint)
 
-    # --- Regenerated-only path: consume workspace/.regenerated.json ---
-    # If `generate --only-rejected` produced a manifest of regenerated
-    # indices, the next `pronunciation` run (without flags) should process
-    # EXACTLY those indices and nothing else. The manifest is one-shot:
-    # after consumption it is deleted. This decouples the regen cycle from
-    # the resumability state (`done` is mutable by other operations like
-    # review-rejected manual-accept, so it cannot reliably track the
-    # regenerated subset).
-    #
-    # Resume safety: the file is NOT deleted here. It is deleted at the
-    # end of `run_pronunciation` only if the check completed successfully
-    # (no exception propagated out). If the user Ctrl+C's mid-check, the
-    # file survives and the next `pronunciation` run picks up the
-    # remaining (not-yet-done) indices via a `done` filter.
-    regen_path = cfg.paths.regenerated
-    regen_target: set[int] | None = None
-    if regen_path.exists():
-        try:
-            regen_target = common.read_checkpoint(regen_path)
-        except Exception:
-            regen_target = set()
-        if regen_target:
-            accepted_wav_idx = {
-                int(p.stem) for p in cfg.paths.accepted_wav.glob("*.wav")
-            }
-            regen_target = regen_target & accepted_wav_idx
-            logger.info(
-                "Regenerated manifest read: %d indices eligible to re-score "
-                "(filter done and intersect accepted_wav/ below; "
-                "file deleted only on successful completion)",
-                len(regen_target),
-            )
-        else:
-            # Empty manifest, just clean up.
-            regen_path.unlink()
-
     if only_rejected:
         # Step-specific source: pronunciation-rejected sidecars only.
         # Unlike generate/validate --only-rejected (which are step-agnostic
@@ -1273,29 +1232,6 @@ def run_pronunciation(
         logger.info(
             "--only-rejected: %d pronunciation-rejected clips to re-score", len(clips)
         )
-    elif regen_target is not None and regen_target:
-        # Regenerated-only path: build the work list from accepted_wav/
-        # restricted to the regenerated indices. Resumability against the
-        # `done` set is applied so a Ctrl+C'd previous run can resume
-        # cleanly: only the not-yet-processed manifest entries are
-        # re-scored. The new audio has no PER score yet, so we MUST hit
-        # every manifest entry at least once — the `done` filter just
-        # avoids re-scoring the ones that completed in a previous run.
-        clips = _build_clips(cfg)
-        target_set = set(regen_target)
-        before = len(clips)
-        clips = [c for c in clips if c.idx in target_set and c.idx not in done]
-        if before - len(clips):
-            logger.info(
-                "Resume: %d manifest clips already in done (skipped), %d to process",
-                before - len(clips),
-                len(clips),
-            )
-        else:
-            logger.info(
-                "Regenerated-only: %d clips in accepted_wav/ to re-score",
-                len(clips),
-            )
     else:
         # Normal full run: build from accepted_wav/, skip already-done (resumability).
         clips = _build_clips(cfg)
@@ -1370,15 +1306,15 @@ def run_pronunciation(
         # --- Persist pronunciation checkpoint: all processed indices ---
         # Same as generate/validate: `done` is the cumulative set of fully-
         # processed indices (accept OR reject). On --only-rejected we merge
-        # with the existing checkpoint (we only re-scored a subset, the rest
-        # stays done). On a full pass we replace (we re-scored everything
-        # present, so the checkpoint must reflect that — a threshold change
-        # can drop previously-accepted clips correctly this way).
+        # the just-processed subset with the pre-existing checkpoint. On a
+        # full pass we also MERGE (not replace) — `done` is monotonic,
+        # like generate/validate, so manual-accepts via review-rejected are
+        # not wiped out and resumability is always correct.
         newly_done = {r.clip.idx for r in results}
         if only_rejected:
             final_done = done | newly_done
         else:
-            final_done = newly_done
+            final_done = done | newly_done
         common.write_checkpoint(cfg.paths.pronunciation_checkpoint, final_done)
         logger.info(
             "Pronunciation checkpoint updated: %d total done (%d processed this run)",
@@ -1409,13 +1345,5 @@ def run_pronunciation(
             r for r in word_rows if r["occurrences"] >= min_occ and r["mean_per"] > 0.0
         ][: cfg.phoneme_word_top_n]
         result["worst_words"] = filtered_worst
-
-    # Final cleanup of the regenerated manifest. Reached only if the
-    # function returned normally (no exception), so a Ctrl+C mid-check
-    # leaves the file in place for a future `pronunciation` run to
-    # resume. Also cleans up when the file was empty at start of run.
-    if regen_path.exists():
-        regen_path.unlink()
-        logger.info("Regenerated manifest consumed and deleted: %s", regen_path)
 
     return result

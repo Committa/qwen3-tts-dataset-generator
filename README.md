@@ -151,13 +151,9 @@ When validation rejects clips, inspect and retry:
 # Option A (fast): regenerate and re-validate only the rejected clips
 poetry run gen-dataset --step generate --only-rejected
 poetry run gen-dataset --step validate --only-rejected
-poetry run gen-dataset --from pronunciation   # pronunciation + normalize + publish
-# (pronunciation here is full, since `--from` does not pass --only-rejected)
-# If you only want to re-score the regenerated clips (~1 minute on a 29k
-# corpus instead of ~11), the right tool is the regenerated-only path:
-# `generate --only-rejected` writes `workspace/.regenerated.json` with the
-# indices it just regenerated; the next plain `pronunciation` consumes it
-# one-shot and processes ONLY those. No flag needed.
+# `generate --only-rejected` automatically removes the regenerated indices
+# from the pronunciation checkpoint (P2 design), so the next plain
+# `pronunciation` run re-scores only those regenerated clips via resumability.
 poetry run gen-dataset --step pronunciation
 poetry run gen-dataset --from normalize
 # (`--step pronunciation --only-rejected` is a different tool: re-score

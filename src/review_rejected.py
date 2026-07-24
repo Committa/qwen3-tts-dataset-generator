@@ -369,10 +369,13 @@ def _accept_clip(cfg: common.Config, clip: RejectedClip) -> None:
     operates on a single clip without re-loading config or iterating.
 
     For pronunciation-step rejections (sidecar carries ``ref_phonemes`` /
-    ``hyp_phonemes``), the clip's index is added to the pronunciation
-    ``done`` set so a subsequent ``--step pronunciation --only-rejected``
-    does not re-score it. Validate-step rejects are not tracked there
-    because validate already manages its own checkpoint.
+    ``hyp_phonemes``), the clip is accepted on disk but its pronunciation
+    ``done`` set is NOT touched — the manual accept is a human judgment
+    on audio quality (the ASR/WER review), not a pronunciation PER pass,
+    and the pronunciation checkpoint must remain a pure record of what
+    ``run_pronunciation`` has actually processed. The next
+    ``pronunciation`` run (or ``generate --only-rejected``, which removes
+    the index from ``done``) will handle it correctly.
 
     Args:
         cfg: Pipeline configuration.
@@ -392,15 +395,6 @@ def _accept_clip(cfg: common.Config, clip: RejectedClip) -> None:
     for p in (clip.sidecar_path, clip.wav_path):
         if p.exists():
             p.unlink()
-    # Sync pronunciation checkpoint: a manually-accepted pronunciation-reject
-    # is "done" from pronunciation's POV — do not re-score on the next pass.
-    if clip.ref_phonemes or clip.hyp_phonemes:
-        done = common.read_checkpoint(cfg.paths.pronunciation_checkpoint)
-        done.add(clip.index)
-        common.write_checkpoint(cfg.paths.pronunciation_checkpoint, done)
-        logger.info(
-            "Pronunciation checkpoint updated (manual accept): idx=%d", clip.index
-        )
     logger.info("ACCEPT idx=%d -> %s", clip.index, src.name)
 
 
@@ -435,15 +429,6 @@ def _restore_rejected(cfg: common.Config, clip: RejectedClip) -> None:
     clip.sidecar_path.write_text(
         json.dumps(sidecar, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    # Undo the pronunciation-checkpoint add from the prior _accept_clip call,
-    # so the clip will be re-scored on the next --only-rejected pass.
-    if clip.ref_phonemes or clip.hyp_phonemes:
-        done = common.read_checkpoint(cfg.paths.pronunciation_checkpoint)
-        done.discard(clip.index)
-        common.write_checkpoint(cfg.paths.pronunciation_checkpoint, done)
-        logger.info(
-            "Pronunciation checkpoint updated (re-rejected): idx=%d", clip.index
-        )
     logger.info("RESTORE-REJECTED idx=%d -> %s", clip.index, rejected_wav.name)
 
 

@@ -370,30 +370,17 @@ def run_generate(cfg: common.Config, only_rejected: bool = False) -> dict[str, A
             }
         done -= rejected_idx
         common.write_checkpoint(cfg.paths.checkpoint, done)
-        # Record the regenerated indices in `workspace/.regenerated.json`.
-        # The next `pronunciation` run will:
-        #   1. pick up exactly these indices (intersected with accepted_wav/),
-        #      skipping resumability (the new audio has no PER score yet);
-        #   2. delete the file once consumed (one-shot, not cumulative).
-        # This is robust to manual-accept / --only-rejected operations between
-        # the regen and the pronunciation run, because the manifest is
-        # read once and then deleted, independent of pronunciation's `done`
-        # checkpoint (which other operations can modify).
-        regen_path = cfg.paths.regenerated
-        existing: set[int] = set()
-        if regen_path.exists():
-            try:
-                existing = set(common.read_checkpoint(regen_path))
-            except Exception:
-                existing = set()
-        existing.update(rejected_idx)
-        common.write_checkpoint(regen_path, existing)
-        logger.info(
-            "Recorded %d regenerated indices in %s (total in file: %d)",
-            len(rejected_idx),
-            regen_path,
-            len(existing),
-        )
+        # Invalidate the pronunciation checkpoint for the regenerated indices:
+        # the new audio has not been pronunciation-checked yet, and the old
+        # PER score no longer applies. The next plain `pronunciation` run
+        # (resumability: accepted_wav/ - done) will pick them up automatically
+        # because they are no longer in `done`. This is the P2 design —
+        # generate --only-rejected removes the regenerated indices from
+        # pronunciation's `done` set so the user does NOT need any special
+        # flag; a standard `pronunciation` re-scores only the new ones.
+        pron_done = common.read_checkpoint(cfg.paths.pronunciation_checkpoint)
+        pron_done -= rejected_idx
+        common.write_checkpoint(cfg.paths.pronunciation_checkpoint, pron_done)
         rejected_dir = cfg.paths.rejected
         for idx in rejected_idx:
             # Wav in raw_wav/ is the old source we generated from — drop it
