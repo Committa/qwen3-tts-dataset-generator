@@ -1172,6 +1172,16 @@ def run_pronunciation(
     removes the sidecar (the clip is no longer rejected). Reject just
     refreshes the sidecar PER in place (wav stays in ``rejected/``).
 
+    Regenerated-only path: when ``generate --only-rejected`` runs, it
+    writes ``workspace/.regenerated.json`` containing the indices it
+    regenerated. On a subsequent ``pronunciation`` run (no flag), if
+    that file exists, it is consumed (one-shot, deleted after read): the
+    work set becomes exactly the regenerated indices intersected with
+    ``accepted_wav/``. Resumability (``done``) is bypassed because the
+    new audio has no PER score yet. This avoids the noise caused by
+    operations that mutate ``done`` (e.g. ``review-rejected`` manual
+    accept) between the regen cycle and the pronunciation run.
+
     Args:
         cfg: Pipeline configuration.
         calibrate: If True, measure-only mode (no rejections); prints and
@@ -1207,6 +1217,36 @@ def run_pronunciation(
     # `done` (see below).
     done: set[int] = common.read_checkpoint(cfg.paths.pronunciation_checkpoint)
 
+    # --- Regenerated-only path: consume workspace/.regenerated.json ---
+    # If `generate --only-rejected` produced a manifest of regenerated
+    # indices, the next `pronunciation` run (without flags) should process
+    # EXACTLY those indices and nothing else. The manifest is one-shot:
+    # after consumption it is deleted. This decouples the regen cycle from
+    # the resumability state (`done` is mutable by other operations like
+    # review-rejected manual-accept, so it cannot reliably track the
+    # regenerated subset).
+    regen_path = cfg.paths.regenerated
+    regen_target: set[int] | None = None
+    if regen_path.exists():
+        try:
+            regen_target = common.read_checkpoint(regen_path)
+        except Exception:
+            regen_target = set()
+        if regen_target:
+            accepted_wav_idx = {
+                int(p.stem) for p in cfg.paths.accepted_wav.glob("*.wav")
+            }
+            regen_target = regen_target & accepted_wav_idx
+            regen_path.unlink()
+            logger.info(
+                "Regenerated manifest consumed: %d indices to re-score, "
+                "file deleted",
+                len(regen_target),
+            )
+        else:
+            # Empty manifest, just clean up.
+            regen_path.unlink()
+
     if only_rejected:
         # Step-specific source: pronunciation-rejected sidecars only.
         # Unlike generate/validate --only-rejected (which are step-agnostic
@@ -1222,6 +1262,16 @@ def run_pronunciation(
         clips = _build_clips_from_rejected(cfg)
         logger.info(
             "--only-rejected: %d pronunciation-rejected clips to re-score", len(clips)
+        )
+    elif regen_target is not None and regen_target:
+        # Regenerated-only path: build the work list from accepted_wav/
+        # restricted to the regenerated indices. Resumability is bypassed
+        # because the new audio has no PER score yet — we MUST re-score.
+        clips = _build_clips(cfg)
+        target_set = set(regen_target)
+        clips = [c for c in clips if c.idx in target_set]
+        logger.info(
+            "Regenerated-only: %d clips in accepted_wav/ to re-score", len(clips)
         )
     else:
         # Normal full run: build from accepted_wav/, skip already-done (resumability).

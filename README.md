@@ -153,10 +153,16 @@ poetry run gen-dataset --step generate --only-rejected
 poetry run gen-dataset --step validate --only-rejected
 poetry run gen-dataset --from pronunciation   # pronunciation + normalize + publish
 # (pronunciation here is full, since `--from` does not pass --only-rejected)
-# If you only want to re-score the regenerated clips (much faster on a 29k
-# corpus: ~1 minute instead of ~11), use:
-poetry run gen-dataset --step pronunciation --only-rejected
+# If you only want to re-score the regenerated clips (~1 minute on a 29k
+# corpus instead of ~11), the right tool is the regenerated-only path:
+# `generate --only-rejected` writes `workspace/.regenerated.json` with the
+# indices it just regenerated; the next plain `pronunciation` consumes it
+# one-shot and processes ONLY those. No flag needed.
+poetry run gen-dataset --step pronunciation
 poetry run gen-dataset --from normalize
+# (`--step pronunciation --only-rejected` is a different tool: re-score
+# pronunciation-rejected clips still in rejected/, e.g. after raising
+# phoneme_threshold — does NOT touch the regeneration cycle.)
 
 # Option B (full): regenerate rejected, but re-validate everything
 poetry run gen-dataset --step generate --only-rejected
