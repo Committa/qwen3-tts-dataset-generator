@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import warnings
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -499,6 +500,29 @@ class _SuppressPadTokenWarning(logging.Filter):
         return "Setting `pad_token_id` to `eos_token_id`" not in record.getMessage()
 
 
+class _SuppressPyloudnormClippingWarning(logging.Filter):
+    """Drop the per-clip ``Possible clipped samples in output`` warning.
+
+    ``pyloudnorm.normalize.loudness`` emits this ``UserWarning`` whenever
+    the LUFS-target gain pushes the signal peak above 1.0 -- which happens
+    routinely with TTS audio that starts well below -23 LUFS. It is fired
+    once per clip (tens of thousands of times in a full run) and would
+    otherwise interleave with the tqdm progress bar on stderr.
+
+    The warning is raised through Python's ``warnings`` module
+    (``warnings.warn``), NOT through ``logging``, so a ``logging.Filter``
+    on a handler cannot catch it. ``setup_logging`` installs a matching
+    ``warnings.filterwarnings`` entry; this class is kept as documentation
+    of why the message is silenced, parallel to ``_SuppressPadTokenWarning``
+    on the logging side. The warning is also semantically misleading here:
+    the pipeline peak-normalises to 0.99 right after loudness normalisation,
+    so the output is never actually clipped to disk.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "Possible clipped samples in output" not in record.getMessage()
+
+
 def setup_logging(log_file: Path, level: int = logging.INFO) -> logging.Logger:
     """Configure dual-output logging (file + stdout) for the whole package.
 
@@ -531,6 +555,11 @@ def setup_logging(log_file: Path, level: int = logging.INFO) -> logging.Logger:
         logging.getLogger(noisy).setLevel(logging.WARNING)
     logging.getLogger("transformers.generation.utils").addFilter(
         _SuppressPadTokenWarning()
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message="Possible clipped samples in output",
+        category=UserWarning,
     )
     return parent
 
