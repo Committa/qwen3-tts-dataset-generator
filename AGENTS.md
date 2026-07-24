@@ -41,6 +41,7 @@ poetry run ruff check src            # lint
 - `src/common.py` defines `Config`/`Paths` dataclasses, `PROJECT_ROOT`, and all shared helpers (logging, checkpoint, OOM detection). All other modules import from here. The `speaker` field on `Config` is the voice identity for both modes (preset name for `custom_voice`, custom voice name under `inputs/voices/` for `base`); `x_vector_only_mode` is a flattened top-level field used only in `base` mode. The `Paths` dataclass holds all pipeline paths: only `input_sentences` and `test_sentences` are configurable in `config.yaml` (top-level keys); all other paths (`raw_wav`, `accepted_wav`, `rejected`, manifests, `report`, `checkpoint`, `log_file`, `prompt_cache`) are fixed defaults defined in `_RUNTIME_PATH_DEFAULTS` and resolved relative to `PROJECT_ROOT`.
 - Config paths in `config.yaml` are resolved relative to `PROJECT_ROOT` (= repo root, computed as `Path(__file__).resolve().parent.parent` in `common.py`).
 - Pipeline steps: `generate` → `validate` → `pronunciation` → `normalize` → `publish` (manifest + report + archive). Each can run standalone via `--step`.
+- User-facing deep-dives live under `docs/` (`Pronunciation-verification.md`, `Custom-voices.md`, `Stable-voice.md`, `Retry-workflow.md`, `Configuration-reference.md`) and are linked from `README.md`. `AGENTS.md` remains the dev/AI reference; `docs/*.md` are the longer user-oriented guides. Keep both in sync when behavior changes.
 
 ## Model types & voices
 
@@ -94,7 +95,7 @@ poetry run ruff check src            # lint
 
 ## Coding conventions
 
-- All comments, docstrings, log messages, and user-facing text must be in **English**.
+- All comments, docstrings, log messages, and user-facing text must be in **English**. This includes files under `docs/` and `README.md`.
 - Every public function, method, and class must have a **docstring** describing its purpose, parameters, and return value.
 
 ## Docker
