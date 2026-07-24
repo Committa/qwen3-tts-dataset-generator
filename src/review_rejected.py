@@ -882,5 +882,31 @@ def main(
         _print_summary(decisions, clips)
 
 
+def cli() -> None:
+    """Entry-point wrapper that handles Click+Windows console error-display crash.
+
+    When Click raises an error (e.g.  unknown option), its exception handler
+    tries to write to the Windows console via ``WriteConsoleW``.  If the console
+    handle is invalid (OSError 6), Click itself crashes, burying the real error
+    in a confusing double traceback.  This wrapper catches that OSError, extracts
+    the original Click error from the exception chain, and prints it cleanly.
+    """
+    try:
+        main()
+    except SystemExit:
+        raise
+    except OSError as exc:
+        cause = exc.__context__ if exc.__context__ is not None else exc
+        if isinstance(cause, click.ClickException):
+            print(f"review-rejected: {cause.format_message()}", file=sys.stderr)
+        else:
+            print(
+                "review-rejected: error while displaying usage. "
+                "Use --help to see valid options.",
+                file=sys.stderr,
+            )
+        sys.exit(2)
+
+
 if __name__ == "__main__":
-    main()
+    cli()
