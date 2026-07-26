@@ -8,6 +8,34 @@ When `validate` rejects clips, inspect and retry:
 4. If the ASR/PER was wrong (audio sounds correct): accept manually
 5. Publish the final dataset
 
+## Re-running steps after a publish
+
+`publish` copies the normalized clips into `output/gen{NNN}/wavs/` and
+leaves the workspace state (`raw_wav` + `accepted_wav` + `normalized_wav`
++ `rejected`) intact. This means any step from `validate` onward can be
+re-run after a publish without losing clips:
+
+```bash
+# Re-normalize with different loudness/trim settings and re-publish
+poetry run gen-dataset --step normalize          # re-writes normalized_wav/ (skipped clips are still present)
+# Delete normalized_wav/ first to force a full re-normalize with new settings:
+rm -rf workspace/normalized_wav
+poetry run gen-dataset --step normalize
+poetry run gen-dataset --step publish            # archives a fresh gen{NNN}/
+
+# Re-pronunciation after raising phoneme_threshold: just delete the checkpoint
+# (accepted_wav/ still has all survivors, pronunciation has no FS marker for
+# passing clips so the checkpoint is the only source of truth)
+rm workspace/.pronunciation_checkpoint.json
+poetry run gen-dataset --step pronunciation
+poetry run gen-dataset --from normalize
+
+# Re-validate from scratch: delete the validate checkpoint (raw_wav/ retains
+# every generated clip as a backup because validate copies, never moves)
+rm workspace/.validate_checkpoint.json
+poetry run gen-dataset --from validate
+```
+
 ## Regeneration options
 
 ```bash

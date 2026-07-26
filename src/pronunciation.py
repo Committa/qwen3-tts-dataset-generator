@@ -125,6 +125,28 @@ def _normalize_phonemes(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
+def _normalize_phonemes_pitch(s: str) -> str:
+    """Lowercase and collapse whitespace, but KEEP stress/length diacritics.
+
+    Used to compute ``per_pitch`` (the stress-aware PER variant that feeds the
+    per-clip audit CSV): clips with correct phonemes but flat or wrong stress
+    produce a high ``per_pitch - per`` gap that the threshold-based PER step
+    cannot catch by design, because :func:`_normalize_phonemes` strips those
+    same diacritics on purpose (espeak stress output is noisy and inconsistent
+    across runs). Keeping them here gives the audit tool a ranking signal that
+    directly targets intonation drift.
+
+    Args:
+        s: A space-separated phoneme string (IPA).
+
+    Returns:
+        A cleaned, space-separated phoneme string with stress/length markers
+        preserved.
+    """
+    s = s.lower()
+    return re.sub(r"\s+", " ", s).strip()
+
+
 def _per(reference: str, hypothesis: str) -> float:
     """Phoneme Error Rate between two normalized phoneme strings.
 
@@ -293,7 +315,9 @@ def _make_espeak_backend(lang_code: str) -> Any:
         raise RuntimeError(f"{exc}\n\n{ESPEAK_HINT}") from exc
 
 
-def _phonemize(clips: list[_Clip], lang_code: str) -> dict[int, list[tuple[str, str]]]:
+def _phonemize(
+    clips: list[_Clip], lang_code: str
+) -> tuple[dict[int, list[tuple[str, str]]], dict[int, list[str]]]:
     """Convert each clip's reference text to per-word normalized IPA phonemes.
 
     Uses a sentinel word separator (``_WORD_SENTINEL``) so word boundaries
@@ -303,12 +327,20 @@ def _phonemize(clips: list[_Clip], lang_code: str) -> dict[int, list[tuple[str, 
     same output via :func:`_flat_phonemes`, so espeak-ng is invoked exactly
     once per run (not once for clip-level and once for per-word).
 
+    A parallel ``{idx: [raw_chunk, ...]}`` dict is also returned, so that
+    :func:`_normalize_phonemes_pitch` can be applied to the un-stripped
+    chunks to compute the ``per_pitch`` audit metric without re-running
+    espeak-ng.
+
     Args:
         clips: Clips whose ``expected`` text must be phonemized.
         lang_code: ISO 639-1 language code (e.g. ``"it"``).
 
     Returns:
-        A ``{idx: [(word, phonemes), ...]}`` dict.
+        A ``(per_word, raw_chunks)`` pair of dicts, keyed by clip idx. The
+        first is ``{idx: [(word, normalized_phonemes), ...]}`` for the
+        standard PER step. The second is ``{idx: [raw_chunk, ...]}`` for the
+        stress-aware PER-pitch audit signal.
     """
     from phonemizer.separator import Separator
 
@@ -317,16 +349,19 @@ def _phonemize(clips: list[_Clip], lang_code: str) -> dict[int, list[tuple[str, 
     sentences = [c.expected for c in clips]
     raw = backend.phonemize(sentences, separator=sep, strip=True)
 
-    out: dict[int, list[tuple[str, str]]] = {}
+    per_word: dict[int, list[tuple[str, str]]] = {}
+    raw_chunks: dict[int, list[str]] = {}
     for clip, phonemized in zip(clips, raw):
         words = clip.expected.split()
         chunks = (phonemized or "").split(_WORD_SENTINEL)
-        per_word = [
+        per_word[clip.idx] = [
             (word, _normalize_phonemes(chunks[i]) if i < len(chunks) else "")
             for i, word in enumerate(words)
         ]
-        out[clip.idx] = per_word
-    return out
+        raw_chunks[clip.idx] = [
+            chunks[i] if i < len(chunks) else "" for i in range(len(words))
+        ]
+    return per_word, raw_chunks
 
 
 def _flat_phonemes(per_word: list[tuple[str, str]]) -> str:
@@ -494,7 +529,7 @@ class _PhonemeRecognizer:
             self._cleanup_every,
         )
 
-    def recognize(self, clips: list[_Clip]) -> dict[int, str]:
+    def recognize(self, clips: list[_Clip]) -> tuple[dict[int, str], dict[int, str]]:
         """Recognize each clip to normalized IPA phonemes (batched, 16 kHz mono).
 
         Audio is loaded mono at 16 kHz via ``librosa`` (resampling from the
@@ -507,11 +542,17 @@ class _PhonemeRecognizer:
             clips: Clips to recognize.
 
         Returns:
-            A ``{idx: normalized_phonemes}`` dict.
+            A ``(hyp, hyp_raw)`` pair of dicts. ``hyp`` is normalized via
+            :func:`_normalize_phonemes` (stress/length diacritics stripped)
+            and is what the standard PER step consumes. ``hyp_raw`` is the
+            raw CTC decoder output before normalization, used by
+            :func:`_normalize_phonemes_pitch` to compute the stress-aware
+            ``per_pitch`` audit metric.
         """
         import librosa
 
         hyp: dict[int, str] = {}
+        hyp_raw: dict[int, str] = {}
         progress = tqdm(
             total=len(clips), desc="pronunciation", unit="wav", dynamic_ncols=True
         )
@@ -525,7 +566,9 @@ class _PhonemeRecognizer:
                 ]
                 decoded = self._decode_batch(arrays)
                 for c, ph in zip(chunk, decoded):
-                    hyp[c.idx] = _normalize_phonemes(ph or "")
+                    raw = ph or ""
+                    hyp[c.idx] = _normalize_phonemes(raw)
+                    hyp_raw[c.idx] = raw
                 progress.update(len(chunk))
                 batch_num += 1
                 if batch_num % self._cleanup_every == 0:
@@ -535,7 +578,7 @@ class _PhonemeRecognizer:
             progress.close()
             raise SystemExit(1)
         progress.close()
-        return hyp
+        return hyp, hyp_raw
 
     def _decode_batch(self, arrays: list[Any]) -> list[str]:
         """Run a padded batch through the CTC model and decode to phoneme strings.
@@ -1134,6 +1177,90 @@ def _write_pronunciation_report(
     logger.info("Pronunciation report written to %s", out_path)
 
 
+def _write_audit_per_csv(
+    cfg: common.Config,
+    new_rows: dict[int, dict[str, Any]],
+) -> None:
+    """Persist or update the per-clip PER audit log at ``workspace/.audit_per.csv``.
+
+    Rows are merged by idx with any existing entries: re-running the
+    pronunciation step on a subset of clips (e.g. ``--only-rejected`` or a
+    resumed partial run) refreshes their rows without losing the others.
+    The file is read on demand by the ``audit`` tool to rank
+    post-validate survivors (intonation/prosody drift the threshold-based
+    PER step cannot catch).
+
+    Columns: ``idx|per|per_pitch|ref_phonemes|hyp_phonemes``. ``per`` and
+    ``per_pitch`` are formatted as fixed-precision floats so the audit
+    ranker can parse them with ``float``; the phoneme columns are
+    pipe-escaped (the CTC decoder never emits ``|``, so escaping is moot
+    but ``csv.QUOTE_MINIMAL`` covers it for safety).
+
+    Args:
+        cfg: Pipeline configuration (only ``cfg.paths.audit_per_csv`` is used).
+        new_rows: ``{idx: {"per": str, "per_pitch": str, "ref_phonemes": str,
+            "hyp_phonemes": str}}`` of freshly computed rows to be merged
+            into the on-disk file.
+    """
+    import csv
+
+    out_path = cfg.paths.audit_per_csv
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Load existing entries into a dict keyed by idx (idempotent merge).
+    existing: dict[int, dict[str, str]] = {}
+    if out_path.exists():
+        try:
+            with out_path.open("r", encoding="utf-8", newline="") as fin:
+                reader = csv.DictReader(fin, delimiter="|")
+                for row in reader:
+                    raw_idx = row.get("idx", "")
+                    if not raw_idx:
+                        continue
+                    try:
+                        idx = int(raw_idx)
+                    except ValueError:
+                        continue
+                    existing[idx] = {
+                        "per": row.get("per", ""),
+                        "per_pitch": row.get("per_pitch", ""),
+                        "ref_phonemes": row.get("ref_phonemes", ""),
+                        "hyp_phonemes": row.get("hyp_phonemes", ""),
+                    }
+        except (OSError, csv.Error) as exc:
+            logger.warning(
+                "Cannot read existing audit CSV (%s); overwriting with fresh "
+                "rows only.",
+                exc,
+            )
+            existing = {}
+
+    # Merge: new_rows wins for the idx they cover.
+    for idx, payload in new_rows.items():
+        existing[idx] = {
+            "per": payload["per"],
+            "per_pitch": payload["per_pitch"],
+            "ref_phonemes": payload["ref_phonemes"],
+            "hyp_phonemes": payload["hyp_phonemes"],
+        }
+
+    fieldnames = ["idx", "per", "per_pitch", "ref_phonemes", "hyp_phonemes"]
+    with out_path.open("w", encoding="utf-8", newline="") as fout:
+        writer = csv.writer(fout, delimiter="|", quoting=csv.QUOTE_MINIMAL)
+        writer.writerow(fieldnames)
+        for idx in sorted(existing):
+            r = existing[idx]
+            writer.writerow(
+                [idx, r["per"], r["per_pitch"], r["ref_phonemes"], r["hyp_phonemes"]]
+            )
+    logger.info(
+        "PER audit CSV written to %s (%d rows, %d refreshed this run)",
+        out_path,
+        len(existing),
+        len(new_rows),
+    )
+
+
 def run_pronunciation(
     cfg: common.Config,
     calibrate: bool = False,
@@ -1259,15 +1386,43 @@ def run_pronunciation(
     # --- Reference (espeak-ng) and hypothesis (wav2vec2) phonemes ---
     # espeak-ng runs once and returns per-word phonemes; the flat clip-level
     # string consumed by _per is derived from the same output via _flat_phonemes.
+    # _phonemize also returns the raw per-word chunks (pre-normalization) so
+    # the stress-aware ``per_pitch`` audit metric can be computed without
+    # re-running espeak-ng (see _normalize_phonemes_pitch).
     lang_code = common.language_code(cfg.language)
-    ref_words_map = _phonemize(clips, lang_code)
+    ref_words_map, ref_raw_chunks = _phonemize(clips, lang_code)
     ref_map = {idx: _flat_phonemes(pw) for idx, pw in ref_words_map.items()}
-    hyp_map = _PhonemeRecognizer(cfg).recognize(clips)
+    hyp_map, hyp_raw_map = _PhonemeRecognizer(cfg).recognize(clips)
 
     # --- Evaluate (pure) then act or report ---
     results = _evaluate(clips, ref_map, hyp_map, cfg.phoneme_threshold)
     per_values = [r.per for r in results]
     mean_per = sum(per_values) / len(per_values) if per_values else 0.0
+
+    # --- Per-clip PER audit log (per + stress-aware per_pitch) ---
+    # Always written, every run (normal / calibrate / only-rejected). The
+    # audit tool reads this CSV to rank post-validate survivors; the
+    # ``per_pitch - per`` gap is the ranking signal for intonation drift
+    # that the threshold-based PER step cannot catch by design.
+    ref_map_pitch = {
+        idx: _normalize_phonemes_pitch(" ".join(filter(None, chunks)))
+        for idx, chunks in ref_raw_chunks.items()
+    }
+    hyp_map_pitch = {
+        idx: _normalize_phonemes_pitch(raw) for idx, raw in hyp_raw_map.items()
+    }
+    audit_rows: dict[int, dict[str, Any]] = {}
+    for r in results:
+        ref_pitch = ref_map_pitch.get(r.clip.idx, "")
+        hyp_pitch = hyp_map_pitch.get(r.clip.idx, "")
+        per_pitch = _per(ref_pitch, hyp_pitch) if ref_pitch else 0.0
+        audit_rows[r.clip.idx] = {
+            "per": f"{r.per:.4f}",
+            "per_pitch": f"{per_pitch:.4f}",
+            "ref_phonemes": r.ref_phonemes,
+            "hyp_phonemes": r.hyp_phonemes,
+        }
+    _write_audit_per_csv(cfg, audit_rows)
 
     result: dict[str, Any] = {
         "checked": len(results),

@@ -158,7 +158,7 @@ def main(
                      the `phoneme_check` config flag in a full run; an explicit
                      `--step pronunciation` always runs it (use `--calibrate`
                      to measure the PER distribution without rejecting).
-    - normalize:     resample, loudness, trim silence, 16-bit PCM (in-place)
+    - normalize:     resample, loudness, trim silence, 16-bit PCM (into normalized_wav/)
     - publish:       build LJSpeech manifest + report + archive to output/gen{NNN}/
 
     Default (no flags): full run with auto-clean + archive.
@@ -210,6 +210,7 @@ def main(
     common.ensure_dirs(
         cfg.paths.raw_wav,
         cfg.paths.accepted_wav,
+        cfg.paths.normalized_wav,
         cfg.paths.rejected,
         cfg.paths.manifest_train.parent,
         cfg.paths.report.parent,
@@ -258,6 +259,11 @@ def main(
                 norm_stats = norm_mod.run_normalize(cfg)
             elif s == "publish":
                 # publish = manifest + report + archive
+                if not any(cfg.paths.normalized_wav.glob("*.wav")):
+                    raise click.ClickException(
+                        "Cannot publish: 'normalized_wav/' is empty. "
+                        "Run the normalize step before publish."
+                    )
                 man_stats = man_mod.run_build_manifest(cfg)
                 rep_mod.run_report(
                     cfg, gen_stats, val_stats, pron_stats, norm_stats, man_stats

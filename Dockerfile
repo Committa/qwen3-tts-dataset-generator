@@ -26,7 +26,7 @@ COPY src/ ./src/
 COPY config.yaml ./
 COPY inputs/ ./inputs/
 
-RUN mkdir -p workspace/raw_wav workspace/accepted_wav workspace/rejected output logs inputs
+RUN mkdir -p workspace/raw_wav workspace/accepted_wav workspace/normalized_wav workspace/rejected output logs inputs
 
 ENTRYPOINT ["poetry", "run", "gen-dataset"]
 CMD []

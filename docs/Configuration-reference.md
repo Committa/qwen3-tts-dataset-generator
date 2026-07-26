@@ -49,8 +49,8 @@ are resolved relative to `PROJECT_ROOT` (= repo root, computed as
 
 `Paths` dataclass holds all pipeline paths. Only `input_sentences` and
 `test_sentences` are configurable in `config.yaml` (top-level keys); all
-other paths are fixed defaults defined in `_RUNTIME_PATH_DEFAULTS` and
-resolved relative to `PROJECT_ROOT` (= repo root).
+other paths are fixed defaults and resolved relative to `PROJECT_ROOT`
+(= repo root).
 
 ### Project structure
 
@@ -78,8 +78,9 @@ resolved relative to `PROJECT_ROOT` (= repo root).
 │       └── <name>.wav        # + <name>.txt for ICL transcript
 ├── workspace/              # volatile (auto-cleaned on full run, gitignored)
 │   ├── .voice_cache/                  # per-voice per-model-size VoiceClonePromptItem cache
-│   ├── raw_wav/                       # generated audio
-│   ├── accepted_wav/                  # validate + pronunciation survivors
+│   ├── raw_wav/                       # generated audio (sorgente grezza, kept intact by validate)
+│   ├── accepted_wav/                  # validate + pronunciation survivors (left untouched by normalize)
+│   ├── normalized_wav/                # normalize output (resumable via file existence)
 │   ├── rejected/                      # rejected clips + sidecar JSONs
 │   ├── .generate_checkpoint.json      # generate step resumability (done indices)
 │   ├── .validate_checkpoint.json      # validate step resumability

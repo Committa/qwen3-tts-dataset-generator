@@ -23,7 +23,7 @@ Korean, German, French, Russian, Portuguese, Spanish.
 - **Generate** audio from a text corpus via Qwen3-TTS (batch GPU inference with resumable checkpoint)
 - **Validate** each clip with ASR (faster-whisper) + WER, auto-reject low-quality clips (with checkpoint/resume)
 - **Verify pronunciation** at the phoneme level (wav2vec2 CTC + espeak-ng PER) to catch clips that pass WER but are mispronounced
-- **Normalize** audio: convert to mono, resample to 22050 Hz, loudness normalize (-23 LUFS), trim silence, save as 16-bit PCM
+- **Normalize** audio: convert to mono, resample to 22050 Hz, loudness normalize (-23 LUFS), trim silence, save as 16-bit PCM (writes into `normalized_wav/`, the originals in `accepted_wav/` are kept intact for re-runs)
 - **Manifest** in LJSpeech format (filename|text) with deterministic train/val split
 - **Multi-language**: works with any language supported by Qwen3-TTS
 

@@ -539,9 +539,7 @@ def _show_progress(
     total = len(clips)
     decided = sum(1 for c in clips if str(c.index) in decisions)
     accepted = sum(
-        1
-        for c in clips
-        if decisions.get(str(c.index), {}).get("action") == "accepted"
+        1 for c in clips if decisions.get(str(c.index), {}).get("action") == "accepted"
     )
     rejected = decided - accepted
     left = total - decided
@@ -591,14 +589,10 @@ def _show_feedback(text: str, color: str | None = None) -> None:
 def _print_summary(decisions: dict[str, dict], clips: list[RejectedClip]) -> None:
     """Print a one-shot tally of decisions for clips currently in the queue."""
     accepted = sum(
-        1
-        for c in clips
-        if decisions.get(str(c.index), {}).get("action") == "accepted"
+        1 for c in clips if decisions.get(str(c.index), {}).get("action") == "accepted"
     )
     rejected = sum(
-        1
-        for c in clips
-        if decisions.get(str(c.index), {}).get("action") == "rejected"
+        1 for c in clips if decisions.get(str(c.index), {}).get("action") == "rejected"
     )
     decided = accepted + rejected
     print(

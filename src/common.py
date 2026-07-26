@@ -256,6 +256,9 @@ class Paths:
     accepted_wav: Path = field(
         default_factory=lambda: _resolve_path("workspace/accepted_wav")
     )
+    normalized_wav: Path = field(
+        default_factory=lambda: _resolve_path("workspace/normalized_wav")
+    )
     rejected: Path = field(default_factory=lambda: _resolve_path("workspace/rejected"))
     manifest_train: Path = field(
         default_factory=lambda: _resolve_path("workspace/.manifest_train.csv")
@@ -279,6 +282,12 @@ class Paths:
         default_factory=lambda: _resolve_path(
             "workspace/.pronunciation_checkpoint.json"
         )
+    )
+    audit_per_csv: Path = field(
+        default_factory=lambda: _resolve_path("workspace/.audit_per.csv")
+    )
+    audit_checkpoint: Path = field(
+        default_factory=lambda: _resolve_path("workspace/.audit_checkpoint.json")
     )
     log_file: Path = field(default_factory=lambda: _resolve_path("logs/pipeline.log"))
     prompt_cache: Path = field(
@@ -698,12 +707,18 @@ def check_cuda_or_die(logger: logging.Logger) -> None:
 def clean_working_dirs(cfg: Config) -> None:
     """Remove all volatile workspace content from a previous run.
 
-    Deletes raw_wav, accepted_wav, rejected, checkpoint, and temporary
-    manifest/report files. Preserves the workspace/ directory structure.
+    Deletes raw_wav, accepted_wav, normalized_wav, rejected, checkpoint, and
+    temporary manifest/report files. Preserves the workspace/ directory
+    structure.
     """
     import shutil
 
-    dirs = [cfg.paths.raw_wav, cfg.paths.accepted_wav, cfg.paths.rejected]
+    dirs = [
+        cfg.paths.raw_wav,
+        cfg.paths.accepted_wav,
+        cfg.paths.normalized_wav,
+        cfg.paths.rejected,
+    ]
     for d in dirs:
         if d.exists():
             shutil.rmtree(str(d))
@@ -716,6 +731,8 @@ def clean_working_dirs(cfg: Config) -> None:
         cfg.paths.checkpoint,
         cfg.paths.validate_checkpoint,
         cfg.paths.review_checkpoint,
+        cfg.paths.audit_per_csv,
+        cfg.paths.audit_checkpoint,
     ]:
         if f.exists():
             f.unlink()
@@ -741,8 +758,11 @@ def next_gen_number() -> int:
 def archive_generation(cfg: Config, gen_number: int) -> None:
     """Archive the current dataset as output/gen{NNN}/.
 
-    Moves accepted wavs into gen{NNN}/wavs/, rewrites manifest paths
-    to be relative to the gen directory, and copies report.
+    Copies normalized wavs into gen{NNN}/wavs/ (the source
+    ``normalized_wav/`` is left untouched so the pipeline can be re-run
+    from any step after publish without losing the normalized clips),
+    rewrites manifest paths to be relative to the gen directory, and
+    copies report.
 
     Args:
         cfg: Pipeline configuration.
@@ -755,11 +775,12 @@ def archive_generation(cfg: Config, gen_number: int) -> None:
     wavs_dir = gen_dir / "wavs"
     wavs_dir.mkdir(parents=True, exist_ok=True)
 
-    # Move wavs
-    wavs_moved = 0
-    for src in sorted(cfg.paths.accepted_wav.glob("*.wav")):
-        shutil.move(str(src), str(wavs_dir / src.name))
-        wavs_moved += 1
+    # Copy wavs from normalized_wav/ (not moved, so the workspace survives
+    # publish and the user can re-run normalize/publish without re-validating).
+    wavs_copied = 0
+    for src in sorted(cfg.paths.normalized_wav.glob("*.wav")):
+        shutil.copy2(str(src), str(wavs_dir / src.name))
+        wavs_copied += 1
 
     def _rewrite_manifest(src_path: Path, dest_path: Path) -> None:
         """Rewrite manifest replacing absolute paths with 'wavs/<filename>'."""
@@ -784,7 +805,7 @@ def archive_generation(cfg: Config, gen_number: int) -> None:
         shutil.copy2(str(live_report), str(gen_dir / "report.json"))
 
     logger.info(
-        "Archived generation %03d: %d wavs -> %s", gen_number, wavs_moved, gen_dir
+        "Archived generation %03d: %d wavs -> %s", gen_number, wavs_copied, gen_dir
     )
 
 

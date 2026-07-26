@@ -1,4 +1,11 @@
-"""Step 4: audio normalization - resample, loudness normalization, silence trimming."""
+"""Step 4: audio normalization - resample, loudness normalization, silence trimming.
+
+Reads clips from ``accepted_wav/`` (left untouched) and writes the
+normalized copies into ``normalized_wav/``. This keeps the original
+post-validate audio intact so normalize can be re-run (e.g. after tuning
+``target_lufs``) without re-running validate, and so the publish step
+can copy from ``normalized_wav/`` without emptying the workspace.
+"""
 
 from __future__ import annotations
 
@@ -75,7 +82,24 @@ def _loudness_normalize(data: np.ndarray, sr: int, target_lufs: float) -> np.nda
         return data
 
 
-def _process_file(src: Path, cfg: common.Config) -> tuple[bool, str]:
+def _process_file(src: Path, dest: Path, cfg: common.Config) -> tuple[bool, str]:
+    """Read ``src``, normalize the audio, and write the result to ``dest``.
+
+    The source clip in ``accepted_wav/`` is never modified: the normalized
+    copy is written to ``dest`` under ``normalized_wav/`` so the original
+    can be reused for re-runs of normalize (e.g. after changing
+    ``target_lufs``) without re-running validate.
+
+    Args:
+        src: Path to the input wav (in ``accepted_wav/``), read-only.
+        dest: Path to the output wav (in ``normalized_wav/``), overwritten
+            if it already exists.
+        cfg: Pipeline configuration.
+
+    Returns:
+        A ``(success, reason)`` tuple; ``reason`` is ``"ok"`` on success or
+        a short diagnostic string (``"read_error: ..."``, ``"empty_audio"``).
+    """
     try:
         data, sr = sf.read(str(src), dtype="float32")
     except Exception as e:
@@ -94,43 +118,61 @@ def _process_file(src: Path, cfg: common.Config) -> tuple[bool, str]:
     if peak > 0:
         data = data / peak * 0.99
 
-    sf.write(str(src), data, sr, subtype="PCM_16")
+    sf.write(str(dest), data, sr, subtype="PCM_16")
     return True, "ok"
 
 
 def run_normalize(cfg: common.Config) -> dict[str, Any]:
-    """Normalize all accepted audio clips in-place.
+    """Normalize all accepted audio clips into ``normalized_wav/``.
 
-    Operations:
+    Operations (applied to a copy, the original in ``accepted_wav/`` is
+    left untouched):
         - Convert to mono
         - Resample to target sample rate
-        - Trim leading/trailing silence (preserving ``tail_margin_ms`` of tail,
-          then appending ``tail_pad_ms`` of silence for clean decay boundaries)
+        - Trim leading/trailing silence (preserving ``tail_margin_ms`` of
+          tail, then appending ``tail_pad_ms`` of silence for clean decay
+          boundaries)
         - Loudness normalize to target LUFS
         - Peak normalize to 0.99
         - Save as 16-bit PCM WAV
+
+    Resumability: a clip whose destination file already exists in
+    ``normalized_wav/`` is skipped. To force a full re-normalization the
+    user can delete ``workspace/normalized_wav/`` before re-running.
 
     Args:
         cfg: Pipeline configuration.
 
     Returns:
-        Dict with counts of normalized and failed files.
+        Dict with counts of normalized, skipped (already present) and
+        failed files.
     """
     common.setup_logging(cfg.paths.log_file)
 
     accept_dir = cfg.paths.accepted_wav
+    norm_dir = cfg.paths.normalized_wav
+    common.ensure_dirs(norm_dir)
+
     files = sorted(accept_dir.glob("*.wav"))
     if not files:
         logger.warning("No accepted wav in %s. Run validate step first.", accept_dir)
-        return {"normalized": 0, "failed": 0}
+        return {"normalized": 0, "skipped": 0, "failed": 0}
 
-    # --- Normalize each accepted clip in-place ---
+    # --- Normalize each accepted clip into normalized_wav/ ---
     ok = 0
+    skipped = 0
     failed = 0
     progress = tqdm(files, desc="normalize", unit="wav", dynamic_ncols=True)
     try:
         for wav_path in progress:
-            success, msg = _process_file(wav_path, cfg)
+            dest = norm_dir / wav_path.name
+            if dest.exists():
+                # Resumability via filesystem state: a clip already present
+                # in normalized_wav/ is considered done. Delete the dir to
+                # force a full re-normalize.
+                skipped += 1
+                continue
+            success, msg = _process_file(wav_path, dest, cfg)
             if success:
                 ok += 1
             else:
@@ -142,10 +184,11 @@ def run_normalize(cfg: common.Config) -> dict[str, Any]:
         raise SystemExit(1)
     progress.close()
     logger.info(
-        "Normalization: ok=%d failed=%d (target=%dHz, %.1f LUFS)",
+        "Normalization: ok=%d skipped=%d failed=%d (target=%dHz, %.1f LUFS)",
         ok,
+        skipped,
         failed,
         cfg.target_sample_rate,
         cfg.target_lufs,
     )
-    return {"normalized": ok, "failed": failed}
+    return {"normalized": ok, "skipped": skipped, "failed": failed}

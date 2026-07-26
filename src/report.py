@@ -51,14 +51,18 @@ def run_report(
     common.setup_logging(cfg.paths.log_file)
 
     # --- Gather disk state ---
+    # The audio actually archived by publish lives in normalized_wav/, so
+    # totals/durations are computed from there. accepted_wav/ may hold extra
+    # clips if normalize failed on some (those never reach the archive).
     sentences = common.load_sentences(cfg)
-    accepted = sorted(
-        cfg.paths.accepted_wav.glob("*.wav"), key=lambda p: int(Path(p.name).stem)
+    normalized = sorted(
+        cfg.paths.normalized_wav.glob("*.wav"),
+        key=lambda p: int(Path(p.name).stem),
     )
     rejected_files = list(cfg.paths.rejected.glob("*.wav"))
 
     total_duration = 0.0
-    for w in accepted:
+    for w in normalized:
         total_duration += _audio_duration_seconds(w)
 
     # --- Assemble report ---
@@ -69,7 +73,7 @@ def run_report(
     report = {
         "totals": {
             "input_sentences": len(sentences),
-            "accepted": len(accepted),
+            "accepted": len(normalized),
             "rejected": len(rejected_files),
             "skipped_during_generation": skipped_gen,
         },

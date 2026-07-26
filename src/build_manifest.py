@@ -1,4 +1,11 @@
-"""Step 5: build LJSpeech manifest (filename|text) with deterministic train/val split."""
+"""Step 5: build LJSpeech manifest (filename|text) with deterministic train/val split.
+
+The manifest is sourced from ``normalized_wav/`` (the output of the
+normalize step). The original clips in ``accepted_wav/`` and the
+normalized copies in ``normalized_wav/`` are left untouched by publish
+(see ``common.archive_generation``): this lets the user re-run any step
+from validate onward after publishing without losing state.
+"""
 
 from __future__ import annotations
 
@@ -21,8 +28,9 @@ def _index_from_name(name: str) -> int:
 def run_build_manifest(cfg: common.Config) -> dict[str, Any]:
     """Build LJSpeech-format manifest files (filename|text) with train/val split.
 
-    The split is deterministic based on cfg.seed. Accepted wav files are
-    matched to their expected text by numeric index from the filename stem.
+    The split is deterministic based on cfg.seed. Files are sourced from
+    ``normalized_wav/`` (the output of the normalize step) and matched to
+    their expected text by numeric index from the filename stem.
 
     Args:
         cfg: Pipeline configuration.
@@ -33,13 +41,14 @@ def run_build_manifest(cfg: common.Config) -> dict[str, Any]:
     common.setup_logging(cfg.paths.log_file)
     cfg.paths.manifest_train.parent.mkdir(parents=True, exist_ok=True)
 
-    # --- Load corpus and accepted clips ---
+    # --- Load corpus and normalize survivors ---
     sentences = common.load_sentences(cfg)
-    accept_dir = cfg.paths.accepted_wav
-    files = sorted(accept_dir.glob("*.wav"), key=lambda p: _index_from_name(p.name))
+    norm_dir = cfg.paths.normalized_wav
+    files = sorted(norm_dir.glob("*.wav"), key=lambda p: _index_from_name(p.name))
     if not files:
         logger.warning(
-            "No accepted wav in %s. Run validate+normalize first.", accept_dir
+            "No normalized wav in %s. Run the normalize step before publish.",
+            norm_dir,
         )
         return {"train": 0, "val": 0, "total": 0}
 
