@@ -40,6 +40,7 @@ ruff = ">=0.5.0"
 gen-dataset = "src.pipeline:main"
 test-gen-dataset = "src.test_speaker:main"
 review-rejected = "src.review_rejected:cli"
+audit = "src.audit:cli"
 
 [[tool.poetry.source]]
 name = "pytorch-cu124"
