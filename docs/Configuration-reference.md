@@ -69,6 +69,7 @@ other paths are fixed defaults and resolved relative to `PROJECT_ROOT`
 │   ├── build_manifest.py   # LJSpeech manifest
 │   ├── report.py           # final report
 │   ├── review_rejected.py  # review-rejected interactive triage CLI
+│   ├── audit.py            # post-publish audit interactive triage CLI (per-pitch + audio scan)
 │   ├── pipeline.py         # CLI orchestrator
 │   └── test_speaker.py     # speaker test utility
 ├── inputs/                 # user-provided text corpora and voice samples
@@ -86,6 +87,8 @@ other paths are fixed defaults and resolved relative to `PROJECT_ROOT`
 │   ├── .validate_checkpoint.json      # validate step resumability
 │   ├── .pronunciation_checkpoint.json # pronunciation step resumability
 │   ├── .review_checkpoint.json        # review-rejected interactive triage state
+│   ├── .audit_per.csv                  # per-clip PER audit log (pronunciation step side effect, read by `audit`)
+│   ├── .audit_checkpoint.json          # audit interactive triage state
 │   ├── .manifest_train.csv            # train manifest (before publish)
 │   ├── .manifest_val.csv              # validation manifest (before publish)
 │   ├── .pronunciation_words.csv       # per-word PER ranking (when phoneme_word_report)

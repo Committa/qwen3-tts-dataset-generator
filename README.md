@@ -125,6 +125,13 @@ poetry run gen-dataset --help                  # CLI help
 When validation rejects clips, see the **[Retry workflow](docs/Retry-workflow.md)**
 guide (regeneration options + interactive `review-rejected` triage).
 
+After publishing, if spot-checking reveals artefacts that passed the filters
+(bad intonation, sighs, clicks, truncations), run
+**[Post-publish audit workflow](docs/Audit-workflow.md)** (the `audit`
+tool): it ranks the survivors by per-pitch + audio signals so you only
+listen to a few hundred of the worst suspects, then regenerates the bad
+clips with the existing `--only-rejected` + `--from validate` cycle.
+
 ### Pronunciation verification
 
 The `pronunciation` step (phoneme-level PER) is gated by `phoneme_check` in a
@@ -197,6 +204,7 @@ volatile `workspace/` files and the immutable `output/gen{NNN}/` archives).
 - [Stable voice for dataset training](docs/Stable-voice.md) — recommended workflow for large-scale datasets (clone a reference, avoid preset drift)
 - [Pronunciation verification](docs/Pronunciation-verification.md) — phoneme-level PER, espeak-ng install, threshold tuning, per-word report
 - [Retry workflow](docs/Retry-workflow.md) — regeneration options + interactive rejected-clip triage
+- [Post-publish audit workflow](docs/Audit-workflow.md) — interactive `audit` tool for survivors that still sound bad (intonation/sighs/clicks)
 - [Configuration reference](docs/Configuration-reference.md) — full parameter table, paths, sampling parameters, `test-gen-dataset`
 
 ---

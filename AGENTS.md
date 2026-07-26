@@ -23,6 +23,9 @@ poetry run test-gen-dataset --batch-size 8     # override batch_size for the tes
 poetry run review-rejected          # interactive triage of rejected clips (a/r/p/b/q)
 poetry run review-rejected --restart  # ignore review checkpoint, start from the first clip
 poetry run review-rejected --no-clear  # keep scrollback instead of clearing before each clip
+poetry run audit                    # post-publish triage of accepted clips (a/r/p/b/q)
+poetry run audit --top 200          # restrict to top-200 suspects
+poetry run audit --rank pitch       # rank by per_pitch only (intonation drift focus)
 poetry run gen-dataset --help        # CLI help
 poetry run black src                 # format
 poetry run isort src                 # sort imports (black profile)
@@ -83,6 +86,12 @@ poetry run ruff check src            # lint
 - `normalize` is resumable via filesystem state: a clip whose destination already exists in `workspace/normalized_wav/` is skipped (no checkpoint file). Delete `workspace/normalized_wav/` to force a full re-normalize.
 - Full pipeline run (`gen-dataset` without `--no-clean` or `--step`) auto-cleans workspace/ and archives the result in `output/gen{NNN}/`. **Resume detection:** if a checkpoint with an incomplete generation is found, `pipeline._maybe_clean_workspace` prompts the user (interactive) to choose resume vs. fresh clean; in non-interactive runs it resumes by default to avoid losing progress. `--no-clean` forces resume; deleting the checkpoint forces a fresh clean.
 - Delete `workspace/.generate_checkpoint.json` (and `workspace/raw_wav/`) to restart generation from scratch. Post-publish, the workspace (`raw_wav` + `accepted_wav` + `normalized_wav` + `rejected`) is left intact, so any step from `validate` onward can be re-run without losing clips; to re-validate from scratch just delete `.validate_checkpoint.json` (raw_wav persists as a backup of the generated clips).
+
+## Post-publish audit workflow
+
+The `pronunciation` step **always** writes a per-clip PER log to `workspace/.audit_per.csv` (columns `idx|per|per_pitch|ref_phonemes|hyp_phonemes`). `per_pitch` is a stress-aware variant (kept diacritics that `_normalize_phonemes` strips by design — see `pronunciation.py:58`): the `per_pitch - per` gap is the only ranking signal for intonation drift that the threshold-based PER step cannot see. The CSV is idempotently merged by idx on every run, so re-runs (e.g. `--only-rejected` over a small subset) refresh only those rows without losing the others.
+
+`poetry run audit` is a single-command interactive triage that takes the CSV + a cheap audio scan of `normalized_wav/` (numpy/soundfile: crest factor, low-band energy ratio for sighs, clipping ratio, duration), composes a percentile-ranked `suspect_score` (per_pitch 0.40 + per 0.20 + lf_burst 0.25 + crest 0.15) and walks the user through the top-N. The `r` (bad) action mirrors the `review-rejected` reject contract: writes `workspace/rejected/<idx>.json` with `reason="manual_audit"`, `audited=true`, and the captured `audit_signals` block, then removes the wav from both `normalized_wav/` and `accepted_wav/`. The existing `generate --only-rejected` + `--from validate` cycle regenerates the bad clips unchanged (no new regen logic: `common.read_rejected_indices` already collects these sidecars). Pre-flight hard-fails if `normalized_wav/` is empty or the CSV is missing/incomplete, soft-warns if stale. Resume via `workspace/.audit_checkpoint.json`. See `docs/Audit-workflow.md`.
 
 ## OOM / error behavior
 
