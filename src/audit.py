@@ -602,11 +602,12 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _display_clip(row: _AuditRow) -> None:
+def _display_clip(row: _AuditRow, position: int, total: int) -> None:
     """Print the per-clip header + signal summary above the prompt."""
     delta_pitch = row.per_pitch - row.per
     delta_str = f"{delta_pitch:+.3f}"
     print(
+        f"[{position:>{len(str(total))}}/{total}]  "
         f"idx={row.idx:06d}  suspect={row.suspect_score:.3f}  "
         f"per={row.per:.3f}  per_pitch={row.per_pitch:.3f} "
         f"({_Colors.dim}delta {delta_str}{_Colors.reset})  "
@@ -872,7 +873,7 @@ def main(
                 f"{_Colors.reset}\n"
             )
             sys.stdout.flush()
-            _display_clip(row)
+            _display_clip(row, cursor + 1, total)
             if not note:
                 print(f"  {_Colors.dim}[playing...]{_Colors.reset}")
             player.play(row.wav_path)

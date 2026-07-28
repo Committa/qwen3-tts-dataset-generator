@@ -454,9 +454,12 @@ def _restore_rejected(cfg: common.Config, clip: RejectedClip) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def _format_header(clip: RejectedClip, note: str = "") -> str:
+def _format_header(
+    clip: RejectedClip, position: int, total: int, note: str = ""
+) -> str:
     """Build the one-line header shown above each clip's text."""
     base = (
+        f"[{position:>{len(str(total))}}/{total}]  "
         f"idx={clip.index:06d}  "
         f"{clip.metric_label}={clip.metric_value:.3f} "
         f"(thr {clip.threshold:.3f})  "
@@ -475,10 +478,10 @@ def _format_duration(path: Path) -> str:
         return ""
 
 
-def _display_clip(clip: RejectedClip) -> None:
+def _display_clip(clip: RejectedClip, position: int, total: int) -> None:
     """Print the per-clip header + texts to the terminal (no newline flush)."""
     dur = _format_duration(clip.wav_path)
-    header = _format_header(clip)
+    header = _format_header(clip, position, total)
     if dur:
         header = f"{header}  dur={dur}"
     print(header)
@@ -793,13 +796,10 @@ def main(
     ``workspace/.review_checkpoint.json`` and applied to the filesystem
     immediately, so quitting in the middle never loses progress.
 
-    Two position counters live in the loop:
-
-    - ``cursor``: 0-based index into ``clips``; the clip currently on display.
-    - The header counter (``[N/total]`` in the per-clip line) is derived from
-      ``len(decisions) + 1`` --- always the number of unique decisions made so
-      far plus one, immune to double-counting when the user re-decides the same
-      clip after a ``b``-rewind.
+    The position counter shown in the per-clip header (``[N/total]``) is
+    ``cursor + 1`` --- the 1-based position of the clip currently on display
+    in the queue. The progress banner above it (``_show_progress``) uses the
+    same value, so the two stay consistent across ``b``-rewinds.
     """
     cfg = common.load_config(config_path)
     common.ensure_dirs(
@@ -851,7 +851,7 @@ def main(
             if clear_screen:
                 _maybe_clear()
             _show_progress(clips, decisions, cursor)
-            _display_clip(clip)
+            _display_clip(clip, cursor + 1, total)
             if not note:
                 print(f"  {_Colors.dim}[playing...]{_Colors.reset}")
             player.play(_resolve_wav_path(cfg, clip))
