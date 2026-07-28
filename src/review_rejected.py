@@ -796,10 +796,21 @@ def main(
     ``workspace/.review_checkpoint.json`` and applied to the filesystem
     immediately, so quitting in the middle never loses progress.
 
-    The position counter shown in the per-clip header (``[N/total]``) is
-    ``cursor + 1`` --- the 1-based position of the clip currently on display
-    in the queue. The progress banner above it (``_show_progress``) uses the
-    same value, so the two stay consistent across ``b``-rewinds.
+    Two position counters live in the loop, with different semantics:
+
+    - ``cursor``: 0-based index into ``clips`` (the current queue). The
+      progress banner (``_show_progress``) shows ``cursor + 1`` — the
+      position of the current clip in the live queue.
+    - ``decision_position``: ``len(decisions) + 1`` — the per-clip header
+      shows this as ``[N/total]``. It counts how many decisions (``a`` or
+      ``r``) have been made so far, plus one, so it is **stable across
+      sessions**: on resume the queue shrinks (accepted clips' sidecars are
+      gone), but ``decision_position`` keeps tracking "how far along you
+      were". A ``b``-rewind decrements ``decision_position`` (down to 1).
+
+    The two diverge exactly when the queue shrinks across resumes; the
+    banner reflects "where you are in the queue now", the header reflects
+    "how much progress you've made".
     """
     cfg = common.load_config(config_path)
     common.ensure_dirs(
@@ -840,6 +851,16 @@ def main(
 
     cursor = first_pending
     total = len(clips)
+    # The header counter (``[N/total]``) counts decisions made so far +1, NOT
+    # the position in the queue. This is intentional: on resume the queue may
+    # have shrunk (accepted clips have their sidecar deleted, so they leave
+    # ``rejected/`` and don't reappear in ``_load_rejected_clips``), and the
+    # queue-position counter would jump backwards. Counting decisions keeps
+    # the header stable across sessions and matches the user's intuition of
+    # "how many have I gone through". The progress banner above it
+    # (``_show_progress``) does use the queue position (``cursor + 1``) so the
+    # two convey complementary information.
+    decision_position = len(decisions) + 1
     player = _Player()
     try:
         while cursor < total:
@@ -851,7 +872,7 @@ def main(
             if clear_screen:
                 _maybe_clear()
             _show_progress(clips, decisions, cursor)
-            _display_clip(clip, cursor + 1, total)
+            _display_clip(clip, decision_position, total)
             if not note:
                 print(f"  {_Colors.dim}[playing...]{_Colors.reset}")
             player.play(_resolve_wav_path(cfg, clip))
@@ -863,9 +884,11 @@ def main(
                 )
                 if outcome is _Outcome.ADVANCE:
                     cursor += 1
+                    decision_position += 1
                     break
                 if outcome is _Outcome.REWIND:
                     cursor = max(0, cursor - 1)
+                    decision_position = max(1, decision_position - 1)
                     break
                 if outcome is _Outcome.QUIT:
                     _print_summary(decisions, clips)
