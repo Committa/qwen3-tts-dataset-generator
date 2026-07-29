@@ -796,21 +796,33 @@ def main(
     ``workspace/.review_checkpoint.json`` and applied to the filesystem
     immediately, so quitting in the middle never loses progress.
 
-    Two position counters live in the loop, with different semantics:
+    The per-clip header shows ``[N/M]`` where:
 
-    - ``cursor``: 0-based index into ``clips`` (the current queue). The
-      progress banner (``_show_progress``) shows ``cursor + 1`` — the
-      position of the current clip in the live queue.
-    - ``decision_position``: ``len(decisions) + 1`` — the per-clip header
-      shows this as ``[N/total]``. It counts how many decisions (``a`` or
-      ``r``) have been made so far, plus one, so it is **stable across
-      sessions**: on resume the queue shrinks (accepted clips' sidecars are
-      gone), but ``decision_position`` keeps tracking "how far along you
-      were". A ``b``-rewind decrements ``decision_position`` (down to 1).
+    - ``M`` is ``len(clips)`` (the current queue size, i.e. what is in
+      ``rejected/`` right now).
+    - ``N`` is the number of clips in the **current queue** that already
+      have an entry in the checkpoint ``decisions`` dict, plus one if the
+      clip currently on display has NOT yet been decided (because it is
+      the one you are about to act on). If the current clip IS already
+      decided (you pressed ``b`` to revisit it), N counts it but does
+      NOT add one, so re-voting a clip you already baptized does not
+      advance the counter — only newly-decided clips do.
 
-    The two diverge exactly when the queue shrinks across resumes; the
-    banner reflects "where you are in the queue now", the header reflects
-    "how much progress you've made".
+    The counter relies solely on the checkpoint ``decisions`` dict
+    (``workspace/.review_checkpoint.json``) intersected with the current
+    queue, so it is stable across resumes, never exceeds ``M``, and
+    correctly ignores stale checkpoint entries for clips that have since
+    left the queue (e.g. accepted clips whose sidecar was deleted).
+
+    When every clip in the queue has a decision, the loop ends (it never
+    runs forever); on the next run the pre-loop ``first_pending is None``
+    branch prints "all decided, use --restart" and exits.
+
+    The progress banner above the header (``_show_progress``) uses
+    ``cursor + 1`` — the position of the current clip in the queue — so it
+    and the header can diverge after ``b``-rewinds, conveying
+    complementary information ("where am I in the queue" vs "how much
+    progress I've made").
     """
     cfg = common.load_config(config_path)
     common.ensure_dirs(
@@ -851,16 +863,6 @@ def main(
 
     cursor = first_pending
     total = len(clips)
-    # The header counter (``[N/total]``) counts decisions made so far +1, NOT
-    # the position in the queue. This is intentional: on resume the queue may
-    # have shrunk (accepted clips have their sidecar deleted, so they leave
-    # ``rejected/`` and don't reappear in ``_load_rejected_clips``), and the
-    # queue-position counter would jump backwards. Counting decisions keeps
-    # the header stable across sessions and matches the user's intuition of
-    # "how many have I gone through". The progress banner above it
-    # (``_show_progress``) does use the queue position (``cursor + 1``) so the
-    # two convey complementary information.
-    decision_position = len(decisions) + 1
     player = _Player()
     try:
         while cursor < total:
@@ -869,6 +871,16 @@ def main(
             note = ""
             if idx_key in decisions:
                 note = f"already {decisions[idx_key]['action']}"
+            # Header [N/M]: N = (clips in the current queue already decided)
+            # + 1 if the current clip is NOT yet decided (it's the one you're
+            # about to act on). Recomputed every iteration from the live
+            # ``decisions`` dict + current queue, so it is bounded by ``total``,
+            # stable across resumes (the checkpoint carries ``decisions``),
+            # and never counts stale entries for clips that left the queue
+            # (e.g. accepted clips whose sidecar was deleted). Re-voting a
+            # clip you already baptized does not advance the counter.
+            decided_in_queue = sum(1 for c in clips if str(c.index) in decisions)
+            decision_position = decided_in_queue + (0 if note else 1)
             if clear_screen:
                 _maybe_clear()
             _show_progress(clips, decisions, cursor)
@@ -884,11 +896,9 @@ def main(
                 )
                 if outcome is _Outcome.ADVANCE:
                     cursor += 1
-                    decision_position += 1
                     break
                 if outcome is _Outcome.REWIND:
                     cursor = max(0, cursor - 1)
-                    decision_position = max(1, decision_position - 1)
                     break
                 if outcome is _Outcome.QUIT:
                     _print_summary(decisions, clips)

@@ -855,16 +855,6 @@ def main(
     # --- Interactive loop ---
     cursor = first_pending
     total = len(queue)
-    # The header counter (``[N/total]``) counts decisions made so far +1,
-    # NOT the position in the queue. This mirrors review-rejected's
-    # ``decision_position``: on resume the queue may have shrunk (clips
-    # marked 'r' have their normalized_wav/accepted_wav removed, so they
-    # don't reappear in the queue when it is rebuilt), and the
-    # queue-position counter would jump backwards. Counting decisions
-    # keeps the header stable across sessions. The progress banner above
-    # it uses the queue position (``cursor + 1``) so the two convey
-    # complementary information.
-    decision_position = len(decisions) + 1
     player = _Player()
     try:
         while cursor < total:
@@ -883,6 +873,16 @@ def main(
                 f"{_Colors.reset}\n"
             )
             sys.stdout.flush()
+            # Header [N/M]: N = (clips in the current queue already decided)
+            # + 1 if the current clip is NOT yet decided (it's the one you're
+            # about to act on). Recomputed every iteration from the live
+            # ``decisions`` dict + current queue, so it is bounded by ``total``,
+            # stable across resumes (the checkpoint carries ``decisions``),
+            # and never counts stale entries for clips that left the queue
+            # (e.g. 'r'-marked clips whose normalized_wav/accepted_wav were
+            # removed). Re-voting a clip you already baptized does not advance
+            # the counter.
+            decision_position = decided + (0 if note else 1)
             _display_clip(row, decision_position, total)
             if not note:
                 print(f"  {_Colors.dim}[playing...]{_Colors.reset}")
@@ -892,11 +892,9 @@ def main(
                 outcome = _handle_key(cfg, row, decisions, dry_run, player, cursor)
                 if outcome is _Outcome.ADVANCE:
                     cursor += 1
-                    decision_position += 1
                     break
                 if outcome is _Outcome.REWIND:
                     cursor = max(0, cursor - 1)
-                    decision_position = max(1, decision_position - 1)
                     break
                 if outcome is _Outcome.QUIT:
                     _print_summary(decisions, queue)
