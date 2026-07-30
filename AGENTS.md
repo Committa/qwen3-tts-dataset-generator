@@ -14,6 +14,7 @@ poetry run gen-dataset --step pronunciation           # phoneme-level check (PER
 poetry run gen-dataset --step pronunciation --calibrate  # measure PER distribution, no rejects
 poetry run gen-dataset --step pronunciation --only-rejected  # re-score pronunciation-rejected clips still in rejected/ (step-specific, e.g. after raising phoneme_threshold)
 poetry run gen-dataset --step normalize               # single step normalize
+poetry run gen-dataset --step normalize --force       # re-normalize all clips (wipes normalized_wav/)
 poetry run gen-dataset --step publish                 # manifest + report + archive
 poetry run gen-dataset --from validate                # validate + pronunciation + normalize + publish
 poetry run gen-dataset --accept 7,13                  # manually accept rejected clips

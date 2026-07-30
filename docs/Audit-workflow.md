@@ -45,7 +45,8 @@ poetry run audit
 # → clips marked 'r' are written to rejected/ with reason="manual_audit"
 #   and removed from normalized_wav/ + accepted_wav/.
 
-# 3. Regenerate the bad clips with a fresh RNG draw and re-publish:
+# 3. Regenerate the bad clips with a fresh RNG draw, then re-normalize and
+#    re-publish (--from validate includes normalize automatically):
 poetry run gen-dataset --step generate --only-rejected
 poetry run gen-dataset --from validate      # → output/gen002/
 

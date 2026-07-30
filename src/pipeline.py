@@ -132,6 +132,13 @@ def _maybe_clean_workspace(cfg: common.Config, do_clean: bool, no_clean: bool) -
     "rejecting anything, to help tune phoneme_threshold.",
 )
 @click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="With --step normalize: wipe normalized_wav/ before starting, so "
+    "every clip is re-normalized from scratch.",
+)
+@click.option(
     "--accept",
     "accept_indices",
     type=str,
@@ -145,6 +152,7 @@ def main(
     no_clean: bool,
     only_rejected: bool,
     calibrate: bool,
+    force: bool,
     accept_indices: str | None,
 ) -> None:
     """Orchestrate the TTS dataset pipeline.
@@ -158,7 +166,7 @@ def main(
                      the `phoneme_check` config flag in a full run; an explicit
                      `--step pronunciation` always runs it (use `--calibrate`
                      to measure the PER distribution without rejecting).
-    - normalize:     resample, loudness, trim silence, 16-bit PCM (into normalized_wav/)
+    - normalize:     resample, loudness, trim silence, 16-bit PCM (into normalized_wav/; use `--force` to re-normalize all)
     - publish:       build LJSpeech manifest + report + archive to output/gen{NNN}/
 
     Default (no flags): full run with auto-clean + archive.
@@ -256,7 +264,7 @@ def main(
                     only_rejected=only_rejected,
                 )
             elif s == "normalize":
-                norm_stats = norm_mod.run_normalize(cfg)
+                norm_stats = norm_mod.run_normalize(cfg, force=force)
             elif s == "publish":
                 # publish = manifest + report + archive
                 if not any(cfg.paths.normalized_wav.glob("*.wav")):

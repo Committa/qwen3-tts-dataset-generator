@@ -122,7 +122,7 @@ def _process_file(src: Path, dest: Path, cfg: common.Config) -> tuple[bool, str]
     return True, "ok"
 
 
-def run_normalize(cfg: common.Config) -> dict[str, Any]:
+def run_normalize(cfg: common.Config, force: bool = False) -> dict[str, Any]:
     """Normalize all accepted audio clips into ``normalized_wav/``.
 
     Operations (applied to a copy, the original in ``accepted_wav/`` is
@@ -137,11 +137,14 @@ def run_normalize(cfg: common.Config) -> dict[str, Any]:
         - Save as 16-bit PCM WAV
 
     Resumability: a clip whose destination file already exists in
-    ``normalized_wav/`` is skipped. To force a full re-normalization the
-    user can delete ``workspace/normalized_wav/`` before re-running.
+    ``normalized_wav/`` is skipped. To force a full re-normalization
+    pass ``force=True`` (or delete ``workspace/normalized_wav/`` by
+    hand before re-running).
 
     Args:
         cfg: Pipeline configuration.
+        force: If True, delete and recreate ``normalized_wav/`` before
+            starting, so every clip is re-normalized from scratch.
 
     Returns:
         Dict with counts of normalized, skipped (already present) and
@@ -151,6 +154,14 @@ def run_normalize(cfg: common.Config) -> dict[str, Any]:
 
     accept_dir = cfg.paths.accepted_wav
     norm_dir = cfg.paths.normalized_wav
+
+    if force:
+        import shutil
+
+        if norm_dir.exists():
+            shutil.rmtree(str(norm_dir))
+            logger.info("--force: wiped %s for a full re-normalization.", norm_dir)
+
     common.ensure_dirs(norm_dir)
 
     files = sorted(accept_dir.glob("*.wav"))

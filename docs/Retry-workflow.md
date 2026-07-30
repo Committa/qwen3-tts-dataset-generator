@@ -18,9 +18,7 @@ re-run after a publish without losing clips:
 ```bash
 # Re-normalize with different loudness/trim settings and re-publish
 poetry run gen-dataset --step normalize          # re-writes normalized_wav/ (skipped clips are still present)
-# Delete normalized_wav/ first to force a full re-normalize with new settings:
-rm -rf workspace/normalized_wav
-poetry run gen-dataset --step normalize
+poetry run gen-dataset --step normalize --force  # wipe normalized_wav/ first, then re-normalize everything
 poetry run gen-dataset --step publish            # archives a fresh gen{NNN}/
 
 # Re-pronunciation after raising phoneme_threshold: just delete the checkpoint
