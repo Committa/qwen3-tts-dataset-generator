@@ -26,6 +26,7 @@ poetry run review-rejected --no-clear  # keep scrollback instead of clearing bef
 poetry run audit                    # post-publish triage of accepted clips (a/r/p/b/q)
 poetry run audit --top 200          # restrict to top-200 suspects
 poetry run audit --rank pitch       # rank by per_pitch only (intonation drift focus)
+poetry run audit --only-rejected    # re-review only previously-bad clips (after regeneration)
 poetry run gen-dataset --help        # CLI help
 poetry run black src                 # format
 poetry run isort src                 # sort imports (black profile)

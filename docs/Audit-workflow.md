@@ -48,13 +48,17 @@ poetry run audit
 # 3. Regenerate the bad clips with a fresh RNG draw and re-publish:
 poetry run gen-dataset --step generate --only-rejected
 poetry run gen-dataset --from validate      # → output/gen002/
+
+# 4. Re-audit only the regenerated clips to check whether they are now OK:
+poetry run audit --only-rejected
 ```
 
-The two-step at the end is the same retry workflow you would use after
-`validate`/`pronunciation` rejects (see [Retry
-workflow](Retry-workflow.md)) — the `audit` tool deliberately feeds
-back into the existing on-disk contract so no new regeneration logic is
-needed.
+`--only-rejected` reads the checkpoint from your previous audit run,
+filters the queue to only the clips you marked `bad`, and presents them
+for re-review. The old `bad` decisions are removed from the in-memory
+checkpoint so they are not skipped by the resumability logic. You press
+`a` if the new clip is now acceptable, or `r` if it still needs another
+regeneration attempt.
 
 ## Ranking
 
@@ -99,6 +103,7 @@ Flags:
 | `--top N` | Review fewer/more suspects (default 500). |
 | `--rank composite|per|pitch|audio` | Choose the ranking key (default composite). |
 | `--restart` | Ignore the checkpoint and start over. |
+| `--only-rejected` | Re-review only clips marked `bad` in a previous audit run. Useful after regenerating and re-validating them. |
 | `--dry-run` | Walk the queue without writing files or the checkpoint. |
 | `--no-clear` | Keep the scrollback instead of clearing the screen per clip. |
 
