@@ -34,6 +34,7 @@ Usage:
     poetry run audit
     poetry run audit --top 200
     poetry run audit --rank pitch
+    poetry run audit --only-rejected
     poetry run audit --restart
     poetry run audit --dry-run
 """
@@ -757,6 +758,15 @@ def _print_summary(decisions: dict[str, dict], queue: list[_AuditRow]) -> None:
     help="Ignore the audit checkpoint and start from the first clip.",
 )
 @click.option(
+    "--only-rejected",
+    "only_rejected",
+    is_flag=True,
+    default=False,
+    help="Re-review only clips that were marked 'bad' (r) in a previous "
+    "audit run. Useful after regenerating and re-validating them to "
+    "check whether the new clips are now acceptable.",
+)
+@click.option(
     "--dry-run",
     is_flag=True,
     default=False,
@@ -776,6 +786,7 @@ def main(
     top_n: int,
     rank_by: str,
     restart: bool,
+    only_rejected: bool,
     dry_run: bool,
     clear_screen: bool,
 ) -> None:
@@ -840,13 +851,45 @@ def main(
     if not queue:
         logger.warning("No clips to review.")
         return
-    queue = queue[:top_n]
-    logger.info("Audit queue: top %d by rank=%s (worst first)", len(queue), rank_by)
+    if not only_rejected:
+        queue = queue[:top_n]
+    logger.info("Audit queue: %d clips (rank=%s)", len(queue), rank_by)
 
     # --- Resume from checkpoint ---
     decisions = {} if restart else _load_checkpoint(cfg.paths.audit_checkpoint)
     if restart:
         logger.info("--restart: audit checkpoint ignored.")
+
+    # --- Only-rejected mode: filter queue to previously-bad clips ---
+    if only_rejected:
+        bad_indices = sorted(
+            int(i) for i, d in decisions.items() if d.get("action") == "bad"
+        )
+        if not bad_indices:
+            logger.info(
+                "No previously-audited 'bad' clips found. "
+                "Nothing to re-review. Run `poetry run audit` to start "
+                "a fresh review."
+            )
+            return
+        # Remove the old 'bad' decisions so the resumability check
+        # (first_pending) does not skip them; we want to re-review them.
+        for key in list(decisions):
+            if decisions[key].get("action") == "bad":
+                del decisions[key]
+        queue = [r for r in queue if r.idx in set(bad_indices)]
+        if not queue:
+            logger.info(
+                "Previously-bad clips are no longer in normalized_wav/ "
+                "(regenerated yet?). Nothing to re-review."
+            )
+            _print_summary(decisions, queue)
+            return
+        logger.info(
+            "Only-rejected mode: %d previously-bad clips to re-review.",
+            len(queue),
+        )
+
     first_pending = next(
         (i for i, r in enumerate(queue) if str(r.idx) not in decisions), None
     )
