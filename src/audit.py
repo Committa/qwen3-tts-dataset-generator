@@ -279,6 +279,13 @@ def _check_csv_completeness(
         )
 
 
+def _fmt_mtime(ts: float) -> str:
+    """Format a POSIX timestamp as a local-time string ``YYYY-MM-DD HH:MM:SS``."""
+    from datetime import datetime
+
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _check_csv_staleness(
     per_rows: dict[int, dict[str, Any]],
     normalized_indices: set[int],
@@ -311,14 +318,14 @@ def _check_csv_staleness(
         return
     if nw_mtime > csv_mtime:
         logger.warning(
-            "PER audit CSV (%s) may be stale: its mtime %.0f is older than "
-            "normalized_wav/ dir mtime %.0f. Re-run "
+            "PER audit CSV (%s) may be stale: its mtime %s is older than "
+            "normalized_wav/ dir mtime %s. Re-run "
             "`poetry run gen-dataset --step pronunciation` to refresh the "
             "CSV, or proceed (audio-only signals will still rank on the most "
             "recent wavs).",
             csv_path,
-            csv_mtime,
-            nw_mtime,
+            _fmt_mtime(csv_mtime),
+            _fmt_mtime(nw_mtime),
         )
 
 
