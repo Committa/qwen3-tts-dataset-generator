@@ -94,7 +94,7 @@ testing. Works with any language supported by Qwen3-TTS.
 | `validate` | Check each clip with ASR (faster-whisper) + WER, accept/reject |
 | `pronunciation` | Phoneme-level check (wav2vec2 CTC + espeak-ng PER) on the WER survivors |
 | `normalize` | Resample to 22050 Hz, loudness normalize (-23 LUFS), trim silence, 16-bit PCM |
-| `publish` | Build LJSpeech manifest + report + archive to `output/gen{NNN}/` |
+| `publish` | Build LJSpeech manifest + report + archive to `output/gen{NNN}/`; wavs are spread over `wavs/<first>-<last>/` subdirectories of at most `wavs_per_dir` files (default 9000) so the archive respects the Hugging Face Hub 10000-files-per-directory limit (`0` = flat layout; override per-run with `--step publish --wavs-per-dir N`) |
 
 > **Language support for number normalization:** Full word-to-digit conversion
 > (alpha2digit + num2words) is available for Italian, English, French, Spanish,
@@ -131,6 +131,32 @@ After publishing, if spot-checking reveals artefacts that passed the filters
 tool): it ranks the survivors by per-pitch + audio signals so you only
 listen to a few hundred of the worst suspects, then regenerates the bad
 clips with the existing `--only-rejected` + `--from validate` cycle.
+
+### Publishing to the Hugging Face Hub
+
+The published archive (`output/gen{NNN}/`) is upload-ready: `wavs_per_dir`
+(default 9000) spreads the clips over `wavs/<first>-<last>/` subdirectories
+of at most `wavs_per_dir` files each, because the Hub rejects commits with
+more than 10000 files in a single directory, and `metadata_*.csv` paths
+point into those subfolders (Piper-compatible). Add a `README.md` dataset
+card and a `LICENSE` to the gen folder (publish preserves manual files),
+then upload the folder contents with `upload_large_folder` — with
+[`hf_xet`](https://huggingface.co/docs/hub/xet) installed the upload uses
+Xet storage and is not throttled by the per-file API rate limit:
+
+```python
+from huggingface_hub import HfApi
+
+HfApi().upload_large_folder(
+    folder_path="output/gen001",   # your gen folder
+    repo_id="your-org/your-dataset",
+    repo_type="dataset",
+)
+```
+
+The upload is resumable (state is kept in `<folder>/.cache/.huggingface/`),
+so re-running the same command after an interruption continues where it
+stopped.
 
 ### Pronunciation verification
 
@@ -196,7 +222,8 @@ drift across thousands of clips).
 
 See the **[Project structure](docs/Configuration-reference.md#paths)** section
 of the configuration reference for the full directory tree (including the
-volatile `workspace/` files and the immutable `output/gen{NNN}/` archives).
+volatile `workspace/` files and the `output/gen{NNN}/` archives, which are
+regenerated deterministically by each `publish` run).
 
 ## Further reading
 

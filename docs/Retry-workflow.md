@@ -10,10 +10,17 @@ When `validate` rejects clips, inspect and retry:
 
 ## Re-running steps after a publish
 
-`publish` copies the normalized clips into `output/gen{NNN}/wavs/` and
-leaves the workspace state (`raw_wav` + `accepted_wav` + `normalized_wav`
-+ `rejected`) intact. This means any step from `validate` onward can be
-re-run after a publish without losing clips:
+`publish` copies the normalized clips into `output/gen{NNN}/wavs/` — spread
+over `wavs/<first>-<last>/` subdirectories of at most `wavs_per_dir` files
+each (default 9000, configurable in `config.yaml` or with
+`--step publish --wavs-per-dir N`; `0` = flat). The subdirectories keep the
+archive under the Hugging Face Hub limit of 10000 files per directory, and
+the metadata paths are rewritten accordingly. The archive is regenerated
+deterministically on every publish (`wavs/`, `metadata_*.csv` and
+`report.json` are wiped first; manual files such as `README.md`/`LICENSE`
+are preserved), and the workspace state (`raw_wav` + `accepted_wav` +
+`normalized_wav` + `rejected`) stays intact. This means any step from
+`validate` onward can be re-run after a publish without losing clips:
 
 ```bash
 # Re-normalize with different loudness/trim settings and re-publish

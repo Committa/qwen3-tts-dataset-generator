@@ -373,6 +373,12 @@ class Config:
     val_ratio: float = 0.1
     mem_cleanup_every_n_batches: int = 100
     clean_on_full_run: bool = True
+    # Maximum number of wav files per directory in the published archive.
+    # The Hugging Face Hub rejects commits with more than 10000 files in a
+    # single directory, so >0 spreads the wavs over `wavs/<first-last>/`
+    # subdirectories of at most this many files each (and rewrites the
+    # metadata paths accordingly). 0 = flat `wavs/` layout (legacy).
+    wavs_per_dir: int = 9000
     paths: Paths = field(default_factory=Paths)
 
     @property
@@ -463,6 +469,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
         raw.get("mem_cleanup_every_n_batches", cfg.mem_cleanup_every_n_batches)
     )
     cfg.clean_on_full_run = bool(raw.get("clean_on_full_run", cfg.clean_on_full_run))
+    cfg.wavs_per_dir = int(raw.get("wavs_per_dir", cfg.wavs_per_dir))
 
     cfg.paths = Paths(
         input_sentences=_resolve_path(
@@ -764,6 +771,17 @@ def archive_generation(cfg: Config, gen_number: int) -> None:
     rewrites manifest paths to be relative to the gen directory, and
     copies report.
 
+    When ``cfg.wavs_per_dir > 0`` the wavs are spread over
+    ``wavs/<first>-<last>/`` subdirectories of at most ``wavs_per_dir``
+    files each, and the metadata paths are rewritten accordingly. This
+    keeps the archive publishable on the Hugging Face Hub, which rejects
+    commits with more than 10000 files in a single directory.
+
+    The archive is regenerated deterministically: the previous ``wavs/``,
+    ``metadata_*.csv`` and ``report.json`` are wiped before writing.
+    Manual artifacts in the gen directory (e.g. README.md, LICENSE) are
+    left untouched.
+
     Args:
         cfg: Pipeline configuration.
         gen_number: Archive number (e.g. 3 for gen003).
@@ -773,17 +791,50 @@ def archive_generation(cfg: Config, gen_number: int) -> None:
 
     gen_dir = PROJECT_ROOT / "output" / f"gen{gen_number:03d}"
     wavs_dir = gen_dir / "wavs"
+
+    # Regenerate deterministically: wipe previous archive content, keep
+    # manual artifacts (README.md, LICENSE, ...).
+    if wavs_dir.exists():
+        shutil.rmtree(wavs_dir)
+    for stale in ("metadata_train.csv", "metadata_val.csv", "report.json"):
+        (gen_dir / stale).unlink(missing_ok=True)
     wavs_dir.mkdir(parents=True, exist_ok=True)
+
+    per_dir = int(cfg.wavs_per_dir or 0)
+    wav_files = sorted(cfg.paths.normalized_wav.glob("*.wav"))
+
+    # Highest numeric index among the archived files; caps the last bucket
+    # name so e.g. 29474 files end in "027000-029474/" instead of "-035999/".
+    max_idx = 0
+    for src in wav_files:
+        try:
+            max_idx = max(max_idx, int(src.stem))
+        except ValueError:
+            pass
+
+    def _rel_path(fname: str) -> str:
+        """Archive-relative path of a wav file (subfoldered if wavs_per_dir > 0)."""
+        if per_dir <= 0:
+            return f"wavs/{fname}"
+        try:
+            idx = int(Path(fname).stem)
+        except ValueError:
+            idx = 0
+        start = (idx // per_dir) * per_dir
+        end = min(start + per_dir - 1, max_idx)
+        return f"wavs/{start:06d}-{end:06d}/{fname}"
 
     # Copy wavs from normalized_wav/ (not moved, so the workspace survives
     # publish and the user can re-run normalize/publish without re-validating).
     wavs_copied = 0
-    for src in sorted(cfg.paths.normalized_wav.glob("*.wav")):
-        shutil.copy2(str(src), str(wavs_dir / src.name))
+    for src in wav_files:
+        dest = gen_dir / _rel_path(src.name)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(src), str(dest))
         wavs_copied += 1
 
     def _rewrite_manifest(src_path: Path, dest_path: Path) -> None:
-        """Rewrite manifest replacing absolute paths with 'wavs/<filename>'."""
+        """Rewrite manifest replacing absolute paths with archive-relative paths."""
         if not src_path.exists():
             return
         with src_path.open("r", encoding="utf-8") as fin, dest_path.open(
@@ -794,7 +845,7 @@ def archive_generation(cfg: Config, gen_number: int) -> None:
                 parts = line.strip().split("|", 1)
                 if len(parts) == 2:
                     fname = Path(parts[0]).name
-                    writer.writerow([f"wavs/{fname}", parts[1]])
+                    writer.writerow([_rel_path(fname), parts[1]])
 
     _rewrite_manifest(cfg.paths.manifest_train, gen_dir / "metadata_train.csv")
     _rewrite_manifest(cfg.paths.manifest_val, gen_dir / "metadata_val.csv")
@@ -805,7 +856,11 @@ def archive_generation(cfg: Config, gen_number: int) -> None:
         shutil.copy2(str(live_report), str(gen_dir / "report.json"))
 
     logger.info(
-        "Archived generation %03d: %d wavs -> %s", gen_number, wavs_copied, gen_dir
+        "Archived generation %03d: %d wavs -> %s (wavs_per_dir=%s)",
+        gen_number,
+        wavs_copied,
+        gen_dir,
+        per_dir if per_dir > 0 else "flat",
     )
 
 

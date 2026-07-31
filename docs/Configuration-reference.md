@@ -44,6 +44,7 @@ are resolved relative to `PROJECT_ROOT` (= repo root, computed as
 | `tail_pad_ms` | `80` | ms of silence appended after trimming (clean decay boundary) |
 | `val_ratio` | `0.1` | fraction of data held out for validation |
 | `clean_on_full_run` | `true` | auto-clean workspace before a fresh full run; an incomplete checkpoint prompts resume vs. clean (`--no-clean` overrides) |
+| `wavs_per_dir` | `9000` | max wav files per directory in the published archive (`output/gen{NNN}/wavs/`). The Hugging Face Hub rejects commits with >10000 files in a single directory, so >0 spreads the wavs over `wavs/<first>-<last>/` subdirectories and rewrites the metadata paths accordingly; `0` = flat layout. Override per-run with `--step publish --wavs-per-dir N` |
 
 ## Paths
 
@@ -94,10 +95,12 @@ other paths are fixed defaults and resolved relative to `PROJECT_ROOT`
 │   ├── .pronunciation_words.csv       # per-word PER ranking (when phoneme_word_report)
 │   ├── .pronunciation_report.txt      # pronunciation step CLI/log dump
 │   └── .report.json                   # final report (before publish)
-├── output/                 # immutable datasets + speaker test output
+├── output/                 # dataset archives + speaker test output
 │   ├── gen001/
-│   │   ├── wavs/
-│   │   ├── metadata_train.csv
+│   │   ├── wavs/000000-008999/   # subfolders of ≤ wavs_per_dir files (default 9000;
+│   │   ├── wavs/009000-017999/   # HF Hub limit: 10000 files per directory; 0 = flat)
+│   │   ├── ...
+│   │   ├── metadata_train.csv    # paths point into the wavs/ subfolders
 │   │   ├── metadata_val.csv
 │   │   └── report.json
 │   ├── ...
@@ -108,7 +111,9 @@ other paths are fixed defaults and resolved relative to `PROJECT_ROOT`
 `workspace/` is gitignored (`workspace/*` with `!workspace/.gitkeep`) and
 auto-cleaned on a fresh full run (`clean_on_full_run: true`), so you will
 not see all of these files until you run the pipeline. `output/gen{NNN}/`
-archives are immutable — each full run produces a new numbered directory.
+archives are regenerated deterministically by each `publish` run (`wavs/`,
+`metadata_*.csv` and `report.json` are wiped first; manual files such as
+`README.md` / `LICENSE` are preserved).
 
 ## Sampling parameters
 

@@ -109,3 +109,10 @@ input_sentences: "italian_piper_corpus.txt"        # TTS corpus, one sentence pe
 test_sentences: "test_sentences.txt"    # phrases for `test-gen-dataset`
 val_ratio: 0.1
 clean_on_full_run: true
+
+# Max wav files per directory in the published archive (output/gen{NNN}/wavs/).
+# The Hugging Face Hub rejects commits with >10000 files in a single directory,
+# so >0 spreads the wavs over wavs/<first>-<last>/ subdirectories and rewrites
+# the metadata paths accordingly. 0 = flat layout. Override per-run with
+# `--step publish --wavs-per-dir N`.
+wavs_per_dir: 9000

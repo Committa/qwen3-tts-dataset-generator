@@ -139,6 +139,15 @@ def _maybe_clean_workspace(cfg: common.Config, do_clean: bool, no_clean: bool) -
     "every clip is re-normalized from scratch.",
 )
 @click.option(
+    "--wavs-per-dir",
+    type=int,
+    default=None,
+    help="With --step publish: override config wavs_per_dir (max wav files per "
+    "directory in the archive; >0 spreads them over wavs/<first>-<last>/ "
+    "subdirectories so the archive respects the Hugging Face Hub 10000-files-"
+    "per-directory limit).",
+)
+@click.option(
     "--accept",
     "accept_indices",
     type=str,
@@ -153,6 +162,7 @@ def main(
     only_rejected: bool,
     calibrate: bool,
     force: bool,
+    wavs_per_dir: int | None,
     accept_indices: str | None,
 ) -> None:
     """Orchestrate the TTS dataset pipeline.
@@ -212,9 +222,17 @@ def main(
         raise click.UsageError(
             "--calibrate can only be used with --step pronunciation."
         )
+    if wavs_per_dir is not None and "publish" not in steps_to_run:
+        raise click.UsageError(
+            "--wavs-per-dir can only be used with --step publish or --from "
+            "validate/normalize (steps that include publish)."
+        )
 
     # --- Load config and set up ---
     cfg = common.load_config(config_path)
+    if wavs_per_dir is not None:
+        cfg.wavs_per_dir = wavs_per_dir
+        logger.info("Overriding wavs_per_dir with CLI value: %d", wavs_per_dir)
     common.ensure_dirs(
         cfg.paths.raw_wav,
         cfg.paths.accepted_wav,
