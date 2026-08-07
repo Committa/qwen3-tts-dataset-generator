@@ -1,5 +1,12 @@
 # qwen3-tts-dataset-generator
 
+[![Hugging Face](https://img.shields.io/badge/HuggingFace-serena--synthetic--it--27h-FF9D00)](https://huggingface.co/datasets/committa/serena-synthetic-it-27h)
+[![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.5-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
+[![CUDA](https://img.shields.io/badge/CUDA-12.4-76B900)](https://developer.nvidia.com/cuda-toolkit)
+[![License](https://img.shields.io/github/license/Committa/qwen3-tts-dataset-generator)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Committa/qwen3-tts-dataset-generator)](https://github.com/Committa/qwen3-tts-dataset-generator/releases)
+
 **Pipeline** that transforms a text corpus into a **synthetic TTS dataset**
 validated by ASR. It generates audio with [Qwen3-TTS], filters out low-quality
 clips via WER, checks pronunciation at the phoneme level (PER), normalizes
@@ -26,6 +33,15 @@ Korean, German, French, Russian, Portuguese, Spanish.
 - **Normalize** audio: convert to mono, resample to 22050 Hz, loudness normalize (-23 LUFS), trim silence, save as 16-bit PCM (writes into `normalized_wav/`, the originals in `accepted_wav/` are kept intact for re-runs)
 - **Manifest** in LJSpeech format (filename|text) with deterministic train/val split
 - **Multi-language**: works with any language supported by Qwen3-TTS
+
+## Showcase
+
+A production dataset generated with this pipeline:
+
+**[serena-synthetic-it-27h](https://huggingface.co/datasets/committa/serena-synthetic-it-27h)** —
+Italian single-speaker synthetic TTS dataset (voice "Serena"): ~29.5k clips, ~27 hours,
+22.05 kHz mono WAV, validated with WER + phoneme-level PER, Piper-ready, released under
+CC-BY-4.0 with a full dataset card (Dataset Viewer preview and inline audio samples).
 
 ## Setup
 
