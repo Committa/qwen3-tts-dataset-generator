@@ -184,6 +184,7 @@ def _check_paths(folder: Path) -> list[str]:
         "README.md",
         "LICENSE",
         "report.json",
+        "metadata.csv",
         "metadata_train.csv",
         "metadata_val.csv",
     ]

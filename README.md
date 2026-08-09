@@ -182,10 +182,12 @@ every `wavs/` bucket (derived from the metadata CSVs).
 To combine two archives (e.g. a published dataset plus a supplementary
 generation) into a single uniform archive, use `merge-datasets`: the
 secondary archive is re-indexed after the primary's highest index and
-added entirely to the train split, `report.json` is merged, and the merge
-is refused if the transcripts overlap. Published archives are never
-modified; the merged result lands in a new gen folder and should be
-published under a new, truthful name (e.g. `serena-synthetic-it-28h`):
+added entirely to the train split, `report.json` is merged, a
+concatenated `metadata.csv` (train + val) is emitted for Piper-style
+training, and the merge is refused if the transcripts overlap. Published
+archives are never modified; the merged result lands in a new gen folder
+and should be published under a new, truthful name (e.g.
+`serena-synthetic-it-28h`):
 
 ```bash
 poetry run merge-datasets --archives gen001,gen002 --output gen003

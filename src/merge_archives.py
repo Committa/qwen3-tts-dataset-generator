@@ -8,6 +8,11 @@ rewritten with the standard ``wavs/<first>-<last>/`` bucket layout, and
 ``merge`` section documenting the sources. Transcripts must not overlap
 between the archives (hard fail otherwise).
 
+Besides the split CSVs (``metadata_train.csv``/``metadata_val.csv``), a
+concatenated ``metadata.csv`` (train + val) is emitted as a convenience
+for Piper-style training, which expects a single metadata file and does
+its own random split via ``--validation-split``.
+
 The secondary archive is added entirely to the train split; the primary's
 train/val split is preserved unchanged. Manual artifacts (README.md,
 LICENSE) are copied from the primary archive.
@@ -31,6 +36,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = PROJECT_ROOT / "output"
 GEN_RE = re.compile(r"^gen(\d{3})$")
 METADATA_FILES = ("metadata_train.csv", "metadata_val.csv")
+ARCHIVE_METADATA = (*METADATA_FILES, "metadata.csv")
 
 
 def _list_generations() -> list[Path]:
@@ -288,7 +294,7 @@ def merge_archives(
         raise click.ClickException(
             f"output folder {output} already exists; use --force to overwrite"
         )
-    for stale in ("wavs", *METADATA_FILES, "report.json"):
+    for stale in ("wavs", *ARCHIVE_METADATA, "report.json"):
         stale_path = output / stale
         if stale_path.is_dir():
             shutil.rmtree(stale_path)
@@ -328,6 +334,7 @@ def merge_archives(
 
     _write_metadata(out_train, output / "metadata_train.csv", per_dir, max_idx)
     _write_metadata(out_val, output / "metadata_val.csv", per_dir, max_idx)
+    _write_metadata(out_train + out_val, output / "metadata.csv", per_dir, max_idx)
 
     for meta in ("README.md", "LICENSE"):
         src_meta = primary / meta
@@ -358,7 +365,7 @@ def merge_archives(
         raise RuntimeError(
             f"verification failed: {wavs_after} wavs found but {copied} expected"
         )
-    for meta in METADATA_FILES:
+    for meta in ARCHIVE_METADATA:
         rows = _read_metadata_indexed(output / meta)
         for idx, _ in rows:
             dest = output / _rel_path(idx, per_dir, max_idx)
