@@ -154,6 +154,14 @@ def _maybe_clean_workspace(cfg: common.Config, do_clean: bool, no_clean: bool) -
     default=None,
     help="Manually accept rejected clips by index (comma-separated, e.g. '7,13').",
 )
+@click.option(
+    "--reject",
+    "reject_indices",
+    type=str,
+    default=None,
+    help="Manually reject clips by index (comma-separated, e.g. '7,13'). "
+    "Regenerate them later with --step generate --only-rejected.",
+)
 def main(
     config_path: str | None,
     step: str,
@@ -164,6 +172,7 @@ def main(
     force: bool,
     wavs_per_dir: int | None,
     accept_indices: str | None,
+    reject_indices: str | None,
 ) -> None:
     """Orchestrate the TTS dataset pipeline.
 
@@ -183,6 +192,22 @@ def main(
     Use --from to resume from a specific step without auto-cleaning.
     """
     step = step.lower()
+
+    # --- Manual reject / accept (standalone, no steps) ---
+    if accept_indices is not None and reject_indices is not None:
+        raise click.UsageError("--accept and --reject are mutually exclusive.")
+    if reject_indices is not None:
+        cfg = common.load_config(config_path)
+        common.ensure_dirs(
+            cfg.paths.accepted_wav,
+            cfg.paths.normalized_wav,
+            cfg.paths.rejected,
+            cfg.paths.log_file.parent,
+        )
+        common.setup_logging(cfg.paths.log_file)
+        indices = [int(i.strip()) for i in reject_indices.split(",") if i.strip()]
+        common.reject_clips(cfg, indices)
+        return
 
     # --- Manual accept (standalone, no steps) ---
     if accept_indices is not None:

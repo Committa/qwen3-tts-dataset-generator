@@ -923,6 +923,68 @@ def accept_clips(cfg: Config, indices: list[int]) -> dict[str, int]:
     return {"accepted": accepted, "not_found": not_found}
 
 
+def reject_clips(
+    cfg: Config, indices: list[int], reason: str = "manual"
+) -> dict[str, int]:
+    """Manually reject specific clips by writing a rejection sidecar.
+
+    Mirrors the on-disk contract used by ``audit`` and the validate/pronunciation
+    reject path: a sidecar JSON ``workspace/rejected/<idx>.json`` carrying an
+    integer ``index`` field — the queue consumed by ``read_rejected_indices``
+    and the ``--only-rejected`` regeneration cycle. Existing sidecars are
+    merged, never wiped, so a pronunciation sidecar keeps its phoneme fields.
+    The wav is removed from both ``accepted_wav/`` and ``normalized_wav/`` so
+    that ``validate --only-rejected`` re-copies the regenerated clip and
+    ``normalize`` re-creates its normalized copy (it is filesystem-resumable).
+    ``raw_wav/`` and ``rejected/<idx>.wav`` are left untouched: ``generate
+    --only-rejected`` cleans them up itself.
+
+    Args:
+        cfg: Pipeline configuration.
+        indices: List of sentence indices to reject.
+        reason: Rejection reason stored in the sidecar (default "manual").
+
+    Returns:
+        Dict with rejected and skipped counts.
+    """
+    sentences = load_sentences(cfg)
+    rejected = 0
+    skipped = 0
+    cfg.paths.rejected.mkdir(parents=True, exist_ok=True)
+    for idx in indices:
+        if idx >= len(sentences):
+            logger.warning("Index %d out of range for corpus, skipping.", idx)
+            skipped += 1
+            continue
+        wav_name = f"{idx:06d}.wav"
+        sidecar_path = cfg.paths.rejected / f"{idx:06d}.json"
+        meta: dict = {}
+        if sidecar_path.exists():
+            try:
+                meta = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.warning(
+                    "Corrupted sidecar %s (%s); overwriting.", sidecar_path.name, exc
+                )
+        meta["index"] = idx
+        meta["file"] = wav_name
+        meta["expected"] = sentences[idx]
+        meta["reason"] = reason
+        sidecar_path.write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        for p in (
+            cfg.paths.accepted_wav / wav_name,
+            cfg.paths.normalized_wav / wav_name,
+        ):
+            if p.exists():
+                p.unlink()
+        logger.info("Manually rejected idx=%d -> %s", idx, sidecar_path.name)
+        rejected += 1
+    logger.info("Manual reject: %d rejected, %d skipped", rejected, skipped)
+    return {"rejected": rejected, "skipped": skipped}
+
+
 def resolve_voice_paths(cfg: Config) -> tuple[Path, Path]:
     """Resolve the reference audio and transcript paths for the configured speaker.
 

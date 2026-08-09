@@ -63,6 +63,17 @@ poetry run gen-dataset --from validate              # validate + pronunciation +
 # Option C: ASR/PER was wrong — accept manually
 poetry run gen-dataset --accept 7,13
 poetry run gen-dataset --from normalize
+
+# Option D: manual reject — you decide a clip is bad (no ASR/PER involved)
+poetry run gen-dataset --reject 220,248
+poetry run gen-dataset --step generate --only-rejected
+poetry run gen-dataset --step validate --only-rejected
+poetry run gen-dataset --step pronunciation
+poetry run gen-dataset --from normalize
+# `--reject` uses the same contract as the audit `r` key: writes
+# workspace/rejected/<idx>.json (merging an existing sidecar, so phoneme
+# fields survive) and removes the wav from accepted_wav/ + normalized_wav/.
+# raw_wav/ and the rejected wav are cleaned up by `generate --only-rejected`.
 ```
 
 The difference between A and B: A skips re-validating already-accepted clips
