@@ -1,6 +1,6 @@
 # qwen3-tts-dataset-generator
 
-[![Hugging Face](https://img.shields.io/badge/HuggingFace-serena--synthetic--it--27h-FF9D00)](https://huggingface.co/datasets/committa/serena-synthetic-it-27h)
+[![Hugging Face](https://img.shields.io/badge/HuggingFace-serena--synthetic--it--28h-FF9D00)](https://huggingface.co/datasets/committa/serena-synthetic-it-28h)
 [![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.5-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![CUDA](https://img.shields.io/badge/CUDA-12.4-76B900)](https://developer.nvidia.com/cuda-toolkit)
@@ -38,10 +38,11 @@ Korean, German, French, Russian, Portuguese, Spanish.
 
 A production dataset generated with this pipeline:
 
-**[serena-synthetic-it-27h](https://huggingface.co/datasets/committa/serena-synthetic-it-27h)** —
-Italian single-speaker synthetic TTS dataset (voice "Serena"): ~29.5k clips, ~27 hours,
+**[serena-synthetic-it-28h](https://huggingface.co/datasets/committa/serena-synthetic-it-28h)** —
+Italian single-speaker synthetic TTS dataset (voice "Serena"): ~30.8k clips, ~28.3 hours,
 22.05 kHz mono WAV, validated with WER + phoneme-level PER, Piper-ready, released under
 CC-BY-4.0 with a full dataset card (Dataset Viewer preview and inline audio samples).
+Merges the base corpus (gen001) with a supplementary set of ~1.4k assistant-style phrases.
 
 ## Setup
 
@@ -156,23 +157,42 @@ of at most `wavs_per_dir` files each, because the Hub rejects commits with
 more than 10000 files in a single directory, and `metadata_*.csv` paths
 point into those subfolders (Piper-compatible). Add a `README.md` dataset
 card and a `LICENSE` to the gen folder (publish preserves manual files),
-then upload the folder contents with `upload_large_folder` — with
+then upload with `upload-dataset` — with
 [`hf_xet`](https://huggingface.co/docs/hub/xet) installed the upload uses
 Xet storage and is not throttled by the per-file API rate limit:
 
-```python
-from huggingface_hub import HfApi
-
-HfApi().upload_large_folder(
-    folder_path="output/gen001",   # your gen folder
-    repo_id="your-org/your-dataset",
-    repo_type="dataset",
-)
+```bash
+poetry run upload-dataset --folder output/gen001 --repo your-org/your-dataset
 ```
+
+The target repo must be created first on the Hub (tokens that can write to
+a repo are usually not allowed to create one under an organization
+namespace); the command fails fast with a link to
+<https://huggingface.co/new/dataset> if it is missing.
 
 The upload is resumable (state is kept in `<folder>/.cache/.huggingface/`),
 so re-running the same command after an interruption continues where it
-stopped.
+stopped. It renders a live progress bar, waits out 429 rate limits
+automatically, mirrors milestones to `logs/upload_hf.log`, and ends with a
+hub-side verification of the top-level artifacts plus the first clip of
+every `wavs/` bucket (derived from the metadata CSVs).
+
+### Merging archives
+
+To combine two archives (e.g. a published dataset plus a supplementary
+generation) into a single uniform archive, use `merge-datasets`: the
+secondary archive is re-indexed after the primary's highest index and
+added entirely to the train split, `report.json` is merged, and the merge
+is refused if the transcripts overlap. Published archives are never
+modified; the merged result lands in a new gen folder and should be
+published under a new, truthful name (e.g. `serena-synthetic-it-28h`):
+
+```bash
+poetry run merge-datasets --archives gen001,gen002 --output gen003
+```
+
+Update the dataset card numbers in the merged folder's `README.md`
+(the command prints a checklist), then upload as above.
 
 ### Pronunciation verification
 

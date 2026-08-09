@@ -20,6 +20,9 @@ poetry run gen-dataset --step publish --wavs-per-dir 9000  # override wavs_per_d
 poetry run gen-dataset --from validate                # validate + pronunciation + normalize + publish
 poetry run gen-dataset --accept 7,13                  # manually accept rejected clips
 poetry run gen-dataset --reject 220,248                # manually reject clips (sidecar + wav removal from accepted_wav/normalized_wav), then regenerate with --only-rejected
+poetry run merge-datasets           # merge the two most recent archives (output/genNNN) into the next gen folder; secondary archive re-indexed after the primary and added entirely to train, report.json merged, transcript overlap is refused
+poetry run merge-datasets --archives gen001,gen002 --output gen003 --force  # explicit sources/target, overwrite existing output
+poetry run upload-dataset --folder output/gen003 --repo your-org/your-dataset  # publish a gen folder to the HF Hub (repo must pre-exist; progress bar, 429 retry, post-upload verification, log in logs/upload_hf.log)
 poetry run test-gen-dataset          # speaker test (batched by batch_size)
 poetry run test-gen-dataset --model-type base  # override model_type for the test
 poetry run test-gen-dataset --batch-size 8     # override batch_size for the test
