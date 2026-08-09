@@ -42,7 +42,6 @@ A production dataset generated with this pipeline:
 Italian single-speaker synthetic TTS dataset (voice "Serena"): ~30.8k clips, ~28.3 hours,
 22.05 kHz mono WAV, validated with WER + phoneme-level PER, Piper-ready, released under
 CC-BY-4.0 with a full dataset card (Dataset Viewer preview and inline audio samples).
-Merges the base corpus (gen001) with a supplementary set of ~1.4k assistant-style phrases.
 
 ## Setup
 
